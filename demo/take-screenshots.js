@@ -144,7 +144,7 @@ async function centerTree(page) {
                    document.querySelector('[class*="card"]');
       if (!card) return null;
       const r = card.getBoundingClientRect();
-      return { x: Math.floor(r.left), y: Math.floor(r.top), width: Math.ceil(r.width) + 40, height: Math.ceil(r.height) + 40 };
+      return { x: Math.floor(r.left), y: Math.floor(r.top), width: Math.ceil(r.width) + 40, height: Math.ceil(r.height) + 80 };
     });
     if (cardBox) {
       await screenshot(page, '05-directory-card.png', cardBox);
@@ -263,12 +263,15 @@ async function centerTree(page) {
     // ── 14 Property pane — SharePoint only; write a note file instead ─────────
     fs.writeFileSync(
       path.join(SHOTS_DIR, '14-property-pane.txt'),
-      'This screenshot must be taken from SharePoint Edit mode (property pane is SharePoint-only).\n'
+      'This screenshot must be taken from SharePoint Edit mode (property pane is SharePoint-only).\n' +
+      'Capture (or re-capture) the Visual Style group with Chart Theme = Custom, showing the accent-color\n' +
+      'picker (swatch, hex, RGB, contrast indicator), and the Custom Attributes group with a couple of\n' +
+      'example rows configured.\n'
     );
     console.log('  ✓ 14-property-pane.txt (placeholder note)');
 
-    // ── 15 Theme comparison — four separate shots ─────────────────────────────
-    for (const theme of ['modern', 'minimal', 'corporate', 'dark']) {
+    // ── 15 Theme comparison — five separate shots ─────────────────────────────
+    for (const theme of ['modern', 'minimal', 'corporate', 'dark', 'custom']) {
       await goAndWait(page, `/?view=orgchart&layout=drill&theme=${theme}`, 1500);
       await screenshot(page, `15-theme-${theme}.png`);
     }

@@ -2,7 +2,7 @@ import * as React from 'react';
 import { IconButton } from '@fluentui/react/lib/Button';
 import { Icon } from '@fluentui/react/lib/Icon';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
-import { GraphService, IUserFilterOptions } from '../../../services/GraphService';
+import { GraphService, ICustomAttributeConfig, IUserFilterOptions } from '../../../services/GraphService';
 import { MockGraphService, MockCompanySize } from '../../../services/MockGraphService';
 import { ISmartOrgChartProps, IUserSettings } from './ISmartOrgChartProps';
 import { EmployeeDirectory } from './EmployeeDirectory/EmployeeDirectory';
@@ -18,6 +18,11 @@ const VIEW_META = {
 const LS_KEY      = 'smartOrgChart_userSettings';
 const LS_MOCK_KEY = 'smartOrgChart_mockSize';
 const LS_VIEW_KEY = 'smartOrgChart_currentView';
+
+// Stored alongside the user settings: true when the user explicitly picked a
+// font size. Without it, the admin's Default Font Size applies (and follows
+// later changes to that default).
+const FONT_OVERRIDE_FLAG = 'fontScaleOverride';
 
 // All SharePoint sites in a tenant share one origin, so bare keys would be
 // shared by every web part instance on every page. Scope them by instance ID,
@@ -45,16 +50,34 @@ interface ISmartOrgChartState {
   userSettings: IUserSettings;
   mockSize: MockCompanySize;
   serviceGen: number;
+  isRefreshing: boolean;
 }
 
-function loadUserSettings(defaultFontScale: number, instanceId: string): IUserSettings {
+interface ILoadedSettings {
+  settings: IUserSettings;
+  fontScaleOverridden: boolean;
+}
+
+function loadUserSettings(defaultFontScale: number, instanceId: string): ILoadedSettings {
+  const defaults = buildDefaultSettings(defaultFontScale);
   try {
     const stored = lsGet(LS_KEY, instanceId);
-    if (stored) return { ...buildDefaultSettings(defaultFontScale), ...JSON.parse(stored) };
+    if (stored) {
+      const parsed = JSON.parse(stored) || {};
+      // Legacy entries have no flag and always stored fontScale; treat them as
+      // an override only when they differ from the current admin default.
+      const overridden = typeof parsed.fontScale === 'number' && (
+        parsed[FONT_OVERRIDE_FLAG] === true ||
+        (parsed[FONT_OVERRIDE_FLAG] === undefined && parsed.fontScale !== defaultFontScale)
+      );
+      delete parsed[FONT_OVERRIDE_FLAG];
+      if (!overridden) delete parsed.fontScale;
+      return { settings: { ...defaults, ...parsed }, fontScaleOverridden: overridden };
+    }
   } catch {
     // ignore
   }
-  return buildDefaultSettings(defaultFontScale);
+  return { settings: defaults, fontScaleOverridden: false };
 }
 
 function buildDefaultSettings(defaultFontScale = 1): IUserSettings {
@@ -84,46 +107,103 @@ function readCurrentView(fallback: 'directory' | 'orgchart', instanceId: string)
   return fallback;
 }
 
+function formatLastLoaded(date: Date | null): string {
+  if (!date) return 'not loaded yet';
+  const mins = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins} min ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hr ago`;
+  return date.toLocaleString();
+}
+
 export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOrgChartState> {
   private _instanceId: string;
+  private _mounted = false;
+  // Incremented on every service (re)creation and on unmount; async init work
+  // bails out when its request number is no longer current
+  private _initRequest = 0;
+  private _fontScaleOverridden: boolean;
 
   constructor(props: ISmartOrgChartProps) {
     super(props);
     this._instanceId   = props.context?.instanceId || '';
-    const userSettings = loadUserSettings(props.defaultFontScale || 1, this._instanceId);
+    const loaded       = loadUserSettings(props.defaultFontScale || 1, this._instanceId);
+    this._fontScaleOverridden = loaded.fontScaleOverridden;
     const mockSize     = readMockSize(this._instanceId);
     this.state = {
       currentView: readCurrentView(props.defaultView || 'directory', this._instanceId),
       isSettingsOpen: false,
       graphService: null,
-      userSettings,
+      userSettings: loaded.settings,
       mockSize,
       serviceGen: 0,
+      isRefreshing: false,
     };
   }
 
   public async componentDidMount(): Promise<void> {
+    this._mounted = true;
     await this._initGraphService();
   }
 
+  public componentWillUnmount(): void {
+    this._mounted = false;
+    this._initRequest++;
+  }
+
   public async componentDidUpdate(prev: ISmartOrgChartProps): Promise<void> {
-    if (
-      prev.useDemoData           !== this.props.useDemoData ||
-      prev.dataSource            !== this.props.dataSource  ||
-      prev.excludedAccounts      !== this.props.excludedAccounts ||
-      prev.hideDisabledAccounts  !== this.props.hideDisabledAccounts ||
-      prev.hideGuestUsers        !== this.props.hideGuestUsers ||
+    // Admin changed Default Font Size — apply it unless this user picked their own
+    if (prev.defaultFontScale !== this.props.defaultFontScale && !this._fontScaleOverridden) {
+      const fontScale = this.props.defaultFontScale || 1;
+      this.setState(s => ({ userSettings: { ...s.userSettings, fontScale } }));
+    }
+
+    const serviceChanged =
+      prev.useDemoData         !== this.props.useDemoData ||
+      prev.dataSource          !== this.props.dataSource  ||
+      prev.dottedLineAttribute !== this.props.dottedLineAttribute;
+    const filtersChanged =
+      prev.excludedAccounts       !== this.props.excludedAccounts ||
+      prev.hideDisabledAccounts   !== this.props.hideDisabledAccounts ||
+      prev.hideGuestUsers         !== this.props.hideGuestUsers ||
       prev.restrictToTenantDomain !== this.props.restrictToTenantDomain ||
-      prev.hideNoJobTitle        !== this.props.hideNoJobTitle ||
-      prev.hideNoDepartment      !== this.props.hideNoDepartment ||
-      prev.dottedLineAttribute   !== this.props.dottedLineAttribute
-    ) {
+      prev.hideNoJobTitle         !== this.props.hideNoJobTitle ||
+      prev.hideNoDepartment       !== this.props.hideNoDepartment;
+    // Compared by content, not reference — which custom attributes are
+    // configured changes what GraphService fetches ($select), so it needs a
+    // fresh service; unlike the filters above, updateFilterOptions can't apply it.
+    const customFieldsChanged = this._customFieldsKey(prev.customAttributes) !== this._customFieldsKey(this.props.customAttributes);
+
+    if (serviceChanged || customFieldsChanged) {
       await this._initGraphService();
+    } else if (filtersChanged && this.state.graphService) {
+      // Re-filter the already-downloaded data in memory — no tenant re-download.
+      // Bumping serviceGen remounts the views so they read the new result.
+      this.state.graphService.updateFilterOptions(this._buildFilterOptions(this._getTenantDomain()));
+      this.setState(s => ({ serviceGen: s.serviceGen + 1 }));
     }
   }
 
   private _isDemoMode(): boolean {
     return window.location.hostname === 'localhost' || !!this.props.useDemoData;
+  }
+
+  /**
+   * Tenant domain for "Only show tenant users", derived from the current
+   * user's email. Undefined when the restriction is off, and in demo mode —
+   * demo users are @contoso.com, so restricting to the real tenant's domain
+   * would hide everyone.
+   */
+  private _getTenantDomain(): string | undefined {
+    if (this._isDemoMode() || !this.props.restrictToTenantDomain) return undefined;
+    const userEmail = (this.props.context?.pageContext?.user?.email || '').toLowerCase();
+    const atIdx = userEmail.lastIndexOf('@');
+    return atIdx > 0 ? userEmail.substring(atIdx + 1) : undefined;
+  }
+
+  private _customFieldsKey(config: ICustomAttributeConfig[] | undefined): string {
+    return (config || []).map(c => c.graphField).sort().join(',');
   }
 
   private _buildFilterOptions(tenantDomain?: string): IUserFilterOptions {
@@ -141,10 +221,9 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
   }
 
   private async _initGraphService(): Promise<void> {
+    const request = ++this._initRequest;
     if (this._isDemoMode()) {
-      // No tenantDomain here — demo users are @contoso.com, so restricting to
-      // the real tenant's domain would hide everyone
-      const filterOptions = this._buildFilterOptions();
+      const filterOptions = this._buildFilterOptions(this._getTenantDomain());
       this.setState(prev => ({
         graphService: new MockGraphService(prev.mockSize, filterOptions) as unknown as GraphService,
         serviceGen: prev.serviceGen + 1,
@@ -158,16 +237,10 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
     } catch {
       // Graph client unavailable — fall back to SP Search only
     }
+    // A newer init (or an unmount) happened while awaiting the client
+    if (!this._mounted || request !== this._initRequest) return;
 
-    // Derive tenant domain from the current user's email when the restriction is enabled
-    let tenantDomain: string | undefined;
-    if (this.props.restrictToTenantDomain) {
-      const userEmail = (pageContext.user?.email || '').toLowerCase();
-      const atIdx = userEmail.lastIndexOf('@');
-      if (atIdx > 0) tenantDomain = userEmail.substring(atIdx + 1);
-    }
-
-    const filterOptions = this._buildFilterOptions(tenantDomain);
+    const filterOptions = this._buildFilterOptions(this._getTenantDomain());
 
     const service = new GraphService(
       spHttpClient,
@@ -175,13 +248,15 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
       graphClient,
       this.props.dataSource || 'auto',
       filterOptions,
-      this.props.dottedLineAttribute || ''
+      this.props.dottedLineAttribute || '',
+      (this.props.customAttributes || []).map(c => c.graphField)
     );
     this.setState(prev => ({ graphService: service, serviceGen: prev.serviceGen + 1 }));
   }
 
   private _setMockSize = (size: MockCompanySize): void => {
     lsSet(LS_MOCK_KEY, this._instanceId, String(size));
+    this._initRequest++;
     this.setState(prev => ({
       mockSize: size,
       graphService: new MockGraphService(size, this._buildFilterOptions()) as unknown as GraphService,
@@ -190,11 +265,33 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
   }
 
   private _toggleView = (): void => {
-    this.setState(prev => {
-      const newView: 'directory' | 'orgchart' = prev.currentView === 'directory' ? 'orgchart' : 'directory';
-      lsSet(LS_VIEW_KEY, this._instanceId, newView);
-      return { currentView: newView };
-    });
+    const newView: 'directory' | 'orgchart' = this.state.currentView === 'directory' ? 'orgchart' : 'directory';
+    lsSet(LS_VIEW_KEY, this._instanceId, newView);
+    this.setState({ currentView: newView });
+  }
+
+  private _refreshTitle(): string {
+    const service = this.state.graphService;
+    return `Refresh data (last updated ${formatLastLoaded(service ? service.getLastLoaded() : null)})`;
+  }
+
+  // The last-loaded time changes when the views finish loading, which doesn't
+  // re-render this component — so update the tooltip just before it shows.
+  private _updateRefreshTitle = (e: React.SyntheticEvent<unknown>): void => {
+    (e.currentTarget as unknown as HTMLElement).title = this._refreshTitle();
+  }
+
+  private _refreshData = async (): Promise<void> => {
+    const service = this.state.graphService;
+    if (!service || this.state.isRefreshing) return;
+    this.setState({ isRefreshing: true });
+    try {
+      await service.refresh();
+    } catch {
+      // ignore — the views surface any load error when they remount
+    }
+    if (!this._mounted) return;
+    this.setState(s => ({ isRefreshing: false, serviceGen: s.serviceGen + 1 }));
   }
 
   private _openSettings = (): void => {
@@ -206,13 +303,19 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
   }
 
   private _saveSettings = (settings: IUserSettings): void => {
-    lsSet(LS_KEY, this._instanceId, JSON.stringify(settings));
+    // Only persist the font size when the user chose something other than the
+    // admin default, so later changes to that default still reach them
+    const overridden = (settings.fontScale || 1) !== (this.props.defaultFontScale || 1);
+    this._fontScaleOverridden = overridden;
+    const toStore: { [key: string]: unknown } = { ...settings, [FONT_OVERRIDE_FLAG]: overridden };
+    if (!overridden) delete toStore.fontScale;
+    lsSet(LS_KEY, this._instanceId, JSON.stringify(toStore));
     this.setState({ userSettings: settings, isSettingsOpen: false });
   }
 
   public render(): React.ReactElement<ISmartOrgChartProps> {
-    const { currentView, isSettingsOpen, graphService, userSettings, mockSize, serviceGen } = this.state;
-    const { theme, defaultLayout, logoUrl, companyName } = this.props;
+    const { currentView, isSettingsOpen, graphService, userSettings, mockSize, serviceGen, isRefreshing } = this.state;
+    const { theme, accentColor, defaultLayout, logoUrl, companyName } = this.props;
     const meta        = VIEW_META[currentView];
     const resolvedLogoUrl = (() => {
       if (!logoUrl) return '';
@@ -233,7 +336,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
               <img
                 key={resolvedLogoUrl}
                 src={resolvedLogoUrl}
-                alt="Logo"
+                // Decorative when the company name is shown right beside it
+                alt={companyName ? '' : 'Company logo'}
                 className={styles.logo}
                 onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
               />
@@ -251,6 +355,16 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
           </div>
 
           <div className={styles.headerActions}>
+            <IconButton
+              iconProps={{ iconName: 'Refresh' }}
+              title={this._refreshTitle()}
+              ariaLabel={isRefreshing ? 'Refreshing data' : 'Refresh data'}
+              onClick={this._refreshData}
+              onMouseEnter={this._updateRefreshTitle}
+              onFocus={this._updateRefreshTitle}
+              disabled={!graphService || isRefreshing}
+              className={styles.actionBtn}
+            />
             <IconButton
               iconProps={{ iconName: meta.toggleIcon }}
               title={meta.toggleTitle}
@@ -282,6 +396,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
               showOffice={userSettings.showOffice}
               pageSize={this.props.pageSize}
               theme={theme}
+              accentColor={accentColor}
+              customAttributes={this.props.customAttributes || []}
             />
           )}
 
@@ -296,6 +412,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
               showDepartment={userSettings.showDepartment}
               showOffice={userSettings.showOffice}
               theme={theme}
+              accentColor={accentColor}
+              customAttributes={this.props.customAttributes || []}
               currentUserEmail={this.props.context?.pageContext?.user?.email || ''}
               compactCards={userSettings.compactCards}
               defaultLayout={defaultLayout || 'drill'}

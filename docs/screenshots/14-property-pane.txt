@@ -1,1 +1,4 @@
 This screenshot must be taken from SharePoint Edit mode (property pane is SharePoint-only).
+Capture (or re-capture) the Visual Style group with Chart Theme = Custom, showing the accent-color
+picker (swatch, hex, RGB, contrast indicator), and the Custom Attributes group with a couple of
+example rows configured.

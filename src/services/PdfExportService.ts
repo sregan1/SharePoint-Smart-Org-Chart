@@ -11,12 +11,17 @@ function downloadBlob(content: string, filename: string, mime: string): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  // Revoking synchronously can cancel the download in some browsers
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+
+// International phone numbers ("+1 206 555 0100") start with '+' but can't
+// carry a formula, so they're exempt from the injection guard below
+const PHONE_PATTERN = /^\+[\d\s().-]+$/;
 
 // Prefix cells that Excel would interpret as formulas (CSV injection mitigation)
 function csvCell(c: string): string {
-  const safe = /^[=+\-@\t\r]/.test(c) ? `'${c}` : c;
+  const safe = /^[=+\-@\t\r]/.test(c) && !PHONE_PATTERN.test(c) ? `'${c}` : c;
   return `"${safe.replace(/"/g, '""')}"`;
 }
 

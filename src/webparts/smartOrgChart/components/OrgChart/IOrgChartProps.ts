@@ -1,4 +1,4 @@
-import { GraphService, IOrgNode } from '../../../../services/GraphService';
+import { GraphService, ICustomAttributeConfig, IOrgNode } from '../../../../services/GraphService';
 import { OrgChartTheme } from '../ISmartOrgChartProps';
 
 export interface IOrgChartProps {
@@ -9,6 +9,9 @@ export interface IOrgChartProps {
   showDepartment: boolean;
   showOffice: boolean;
   theme: OrgChartTheme;
+  accentColor?: string;
+  /** Admin-configured Entra ID attributes; only entries with showInOrgChart apply here */
+  customAttributes: ICustomAttributeConfig[];
   currentUserEmail: string;
   compactCards: boolean;
   defaultLayout: 'drill' | 'vertical' | 'horizontal';

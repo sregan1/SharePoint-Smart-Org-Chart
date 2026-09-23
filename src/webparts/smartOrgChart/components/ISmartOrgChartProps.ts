@@ -1,7 +1,7 @@
 import { WebPartContext } from '@microsoft/sp-webpart-base';
 import { ISmartOrgChartWebPartProps } from '../SmartOrgChartWebPart';
 
-export type OrgChartTheme = 'modern' | 'minimal' | 'corporate' | 'dark';
+export type OrgChartTheme = 'modern' | 'minimal' | 'corporate' | 'dark' | 'custom';
 
 export interface ISmartOrgChartProps extends ISmartOrgChartWebPartProps {
   context: WebPartContext;

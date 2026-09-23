@@ -7,7 +7,7 @@
   "manifestVersion": 2,
   "requiresCustomScript": false,
   "supportedHosts": ["SharePointWebPart", "TeamsPersonalApp", "TeamsTab"],
-  "supportsThemeVariants": true,
+  "supportsThemeVariants": false,
   "preconfiguredEntries": [
     {
       "groupId": "5c03119e-3074-46fd-976b-c60198311f70",
@@ -17,16 +17,31 @@
       "officeFabricIconFontName": "Org",
       "properties": {
         "defaultView": "directory",
-        "alphabetFilterField": "firstName",
         "topLevelUser": "",
         "levelsBelow": 3,
-        "levelsAbove": 1,
-        "cardSize": "medium",
-        "showEmail": true,
-        "showPhone": true,
-        "showDepartment": true,
-        "showOffice": true,
-        "pageSize": 50
+        "pageSize": 50,
+        "useDemoData": false,
+        "companyName": "",
+        "logoUrl": "",
+        "theme": "modern",
+        "accentColor": "#0078d4",
+        "defaultLayout": "drill",
+        "defaultZoom": 0,
+        "defaultFontScale": 1,
+        "enableFindMe": true,
+        "enableLayoutToggle": true,
+        "enableStats": true,
+        "enableDeptFilter": true,
+        "enableUserFilter": true,
+        "dataSource": "auto",
+        "dottedLineAttribute": "",
+        "customAttributes": [],
+        "excludedAccounts": "",
+        "restrictToTenantDomain": false,
+        "hideGuestUsers": true,
+        "hideDisabledAccounts": true,
+        "hideNoJobTitle": false,
+        "hideNoDepartment": false
       }
     }
   ]

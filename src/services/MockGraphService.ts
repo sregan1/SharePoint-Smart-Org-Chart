@@ -1,6 +1,6 @@
 // MockGraphService — used automatically when the web part runs on localhost or demo mode.
 // Supports three company sizes (150 / 500 / 1 000) selectable via the demo banner.
-import { GraphService, IGraphUser, IOrgNode, IUserFilterOptions, PresenceAvailability } from './GraphService';
+import { GraphService, IGraphUser, IRawUserData, IUserFilterOptions, PresenceAvailability } from './GraphService';
 
 const delay = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
@@ -26,6 +26,37 @@ const PRESENCE_POOL: PresenceAvailability[] = [
 
 // [email, displayName, jobTitle, department, managerEmail|null, office, businessPhone, accountEnabled?, userType?]
 type RawUser = [string, string, string, string, string | null, string, string, boolean?, string?];
+
+// Demo values for the attributes admins commonly configure as "custom
+// attributes" (see ICustomAttributeConfig) — always generated so a newly
+// configured attribute shows real-looking data immediately in demo mode,
+// without the mock needing to know which fields were actually configured.
+const COST_CENTER: Record<string, string> = {
+  'Executive':        'CC-1900',
+  'Engineering':      'CC-1000',
+  'Product':          'CC-1100',
+  'Sales':            'CC-1200',
+  'Marketing':        'CC-1300',
+  'Finance':          'CC-1400',
+  'Human Resources':  'CC-1500',
+  'Operations':       'CC-1600',
+  'Legal':            'CC-1700',
+};
+
+function buildDemoCustomAttributes(
+  email: string, department: string, officeLocation: string, isGuest: boolean
+): { [field: string]: string } {
+  const n = hashCode(email);
+  const city = (officeLocation || '').split(',')[0].trim() || 'Remote';
+  return {
+    employeeId:          'E' + (10000 + (n % 90000)),
+    employeeType:        isGuest ? 'Contractor' : 'Employee',
+    companyName:         'Contoso Ltd',
+    city,
+    extensionAttribute1: COST_CENTER[department] || 'CC-0000',
+    extensionAttribute2: `Building ${String.fromCharCode(65 + (n % 4))}-${1 + (n % 3)}`,
+  };
+}
 
 // ── Name pools for generated users ────────────────────────────────────────────
 const FIRST_NAMES = [
@@ -517,26 +548,32 @@ function buildRaw(targetCount: number): RawUser[] {
 export type MockCompanySize = 150 | 500 | 1000;
 
 // ── MockGraphService ──────────────────────────────────────────────────────────
+// Supplies generated raw data through the base class's _fetchRawData hook, so
+// filtering, manager bridging, cycle breaking, lookups, tree building and the
+// updateFilterOptions / refresh / getLastLoaded API all reuse GraphService.
 export class MockGraphService extends GraphService {
-  private _mockUsers:       IGraphUser[] = [];
-  private _mockChildrenMap: Map<string, IGraphUser[]> = new Map();
-  private _mockManagerMap:  Map<string, string> = new Map();
-  private _mockPresence:    Map<string, PresenceAvailability> = new Map();
-  private _mockDottedMap:   Map<string, IGraphUser[]> = new Map();
+  private _size: MockCompanySize;
 
   constructor(size: MockCompanySize = 150, filterOptions: IUserFilterOptions = {}) {
-    super(null as any, 'https://localhost', undefined, 'auto', filterOptions);
-    this._init(buildRaw(size));
+    super(null, 'https://localhost', undefined, 'auto', filterOptions);
+    this._size = size;
   }
 
-  private _init(raw: RawUser[]): void {
-    this._mockUsers       = [];
-    this._mockChildrenMap = new Map();
-    this._mockManagerMap  = new Map();
-    this._mockPresence    = new Map();
+  // Demo data is generated locally — never use the persistent cache
+  protected _cacheKey(): string | null {
+    return null;
+  }
 
-    for (const [email, displayName, jobTitle, department, , officeLocation, phone, accountEnabled, userType] of raw) {
-      this._mockUsers.push({
+  protected async _fetchRawData(): Promise<IRawUserData> {
+    await delay(500);   // simulated network latency
+    const raw = buildRaw(this._size);
+    const data: IRawUserData = {
+      users: [], managerIds: new Map(), dottedIds: new Map(), objectIds: new Map(),
+      noPhotoIds: new Set(), fetchedAt: Date.now(),
+    };
+
+    for (const [email, displayName, jobTitle, department, managerEmail, officeLocation, phone, accountEnabled, userType] of raw) {
+      data.users.push({
         id:                email,
         displayName,
         mail:              email,
@@ -548,43 +585,12 @@ export class MockGraphService extends GraphService {
         userPrincipalName: email,
         accountEnabled:    accountEnabled !== false,
         userType:          userType || 'Member',
+        customAttributes:  buildDemoCustomAttributes(email, department, officeLocation, userType === 'Guest'),
       });
+      if (managerEmail) data.managerIds.set(email, managerEmail);
+      data.noPhotoIds.add(email);   // demo users have no photos — UI shows initials
     }
-
-    // Honor the admin User Filters so demo mode behaves like live data
-    this._mockUsers = this._applyUserFilters(this._mockUsers);
-    this._mockUsers.sort((a, b) => a.displayName.localeCompare(b.displayName));
-
-    const byEmail = new Map<string, IGraphUser>(this._mockUsers.map(u => [u.id, u]));
-
-    // Raw manager edges (self-managed rows dropped — mirrors GraphService)
-    const rawMgrOf = new Map<string, string>();
-    for (const [email, , , , managerEmail] of raw) {
-      if (managerEmail && managerEmail !== email) rawMgrOf.set(email, managerEmail);
-    }
-
-    for (const [email] of raw) {
-      const user = byEmail.get(email);
-      if (!user) continue;
-      // Walk up through filtered-out managers to the nearest visible one,
-      // with a visited set to stop manager cycles — mirrors GraphService
-      let mgrEmail = rawMgrOf.get(email);
-      const visited = new Set<string>([email]);
-      while (mgrEmail && !byEmail.has(mgrEmail) && !visited.has(mgrEmail)) {
-        visited.add(mgrEmail);
-        mgrEmail = rawMgrOf.get(mgrEmail);
-      }
-      if (!mgrEmail) continue;
-      const mgr = byEmail.get(mgrEmail);
-      if (!mgr || mgr.id === user.id) continue;
-      this._mockManagerMap.set(user.id, mgr.id);
-      if (!this._mockChildrenMap.has(mgr.id)) this._mockChildrenMap.set(mgr.id, []);
-      (this._mockChildrenMap.get(mgr.id) as IGraphUser[]).push(user);
-    }
-
-    for (const user of this._mockUsers) {
-      this._mockPresence.set(user.id, PRESENCE_POOL[hashCode(user.id) % PRESENCE_POOL.length]);
-    }
+    data.users.sort((a, b) => a.displayName.localeCompare(b.displayName));
 
     // Dotted-line (secondary manager) demo relationships
     const DOTTED: Array<[string, string]> = [
@@ -592,91 +598,27 @@ export class MockGraphService extends GraphService {
       ['ah.tran@contoso.com',     'e.rodriguez@contoso.com'], // UX Design lead ↔ Frontend director
       ['ga.sanchez@contoso.com',  'd.williams@contoso.com'],  // FP&A manager ↔ VP Sales
     ];
-    this._mockDottedMap = new Map();
-    for (const [reportEmail, mgrEmail] of DOTTED) {
-      const rep = byEmail.get(reportEmail);
-      const mgr = byEmail.get(mgrEmail);
-      if (!rep || !mgr) continue;
-      rep.dottedManagerId = mgr.id;
-      if (!this._mockDottedMap.has(mgr.id)) this._mockDottedMap.set(mgr.id, []);
-      (this._mockDottedMap.get(mgr.id) as IGraphUser[]).push(rep);
-    }
-  }
+    for (const [reportEmail, mgrEmail] of DOTTED) data.dottedIds.set(reportEmail, mgrEmail);
 
-  public getAllUsers(): Promise<IGraphUser[]> {
-    return delay(500).then(() => [...this._mockUsers]);
+    return data;
   }
 
   public getUserPhoto(_userId: string): Promise<string | null> {
     return Promise.resolve(null);
   }
 
-  public getDirectReports(userId: string): Promise<IGraphUser[]> {
-    return Promise.resolve([...(this._mockChildrenMap.get(userId.toLowerCase()) || [])]);
+  public async findUser(identifier: string): Promise<IGraphUser | null> {
+    if (!identifier || !identifier.trim()) return null;
+    return super.findUser(identifier);
   }
 
-  public getDottedLineReports(userId: string): Promise<IGraphUser[]> {
-    return Promise.resolve([...(this._mockDottedMap.get(userId.toLowerCase()) || [])]);
-  }
-
-  public hasDirectReports(userId: string): Promise<boolean> {
-    const kids = this._mockChildrenMap.get(userId.toLowerCase());
-    return Promise.resolve(!!(kids && kids.length > 0));
-  }
-
-  public getManagerChain(userId: string, levels: number): Promise<IGraphUser[]> {
-    const byId = new Map<string, IGraphUser>(this._mockUsers.map(u => [u.id, u]));
-    const chain: IGraphUser[] = [];
-    let curId = userId.toLowerCase();
-    for (let i = 0; i < levels; i++) {
-      const mgrId = this._mockManagerMap.get(curId);
-      if (!mgrId) break;
-      const mgr = byId.get(mgrId);
-      if (!mgr) break;
-      chain.unshift(mgr);
-      curId = mgrId;
-    }
-    return Promise.resolve(chain);
-  }
-
-  public findUser(identifier: string): Promise<IGraphUser | null> {
-    const q = identifier.toLowerCase();
-    const found =
-      this._mockUsers.find(u => u.id === q) ||
-      this._mockUsers.find(u => u.mail.toLowerCase() === q) ||
-      this._mockUsers.find(u => u.userPrincipalName.toLowerCase() === q) ||
-      this._mockUsers.find(u => u.displayName.toLowerCase().startsWith(q)) ||
-      null;
-    return Promise.resolve(found);
-  }
-
-  public buildOrgTree(rootUserId: string, levelsBelow: number): Promise<IOrgNode> {
-    const user =
-      this._mockUsers.find(u => u.id === rootUserId.toLowerCase()) ||
-      this._mockUsers.find(u => u.mail.toLowerCase() === rootUserId.toLowerCase());
-    if (!user) return Promise.reject(new Error(`User not found: ${rootUserId}`));
-    const root: IOrgNode = { user, directReports: [], isExpanded: true, childrenLoaded: false, level: 0 };
-    this._loadMockChildren(root, levelsBelow);
-    return delay(400).then(() => root);
-  }
-
-  public getPresence(): Promise<Map<string, PresenceAvailability>> {
-    return delay(200).then(() => new Map(this._mockPresence));
-  }
-
-  private _loadMockChildren(node: IOrgNode, remaining: number): void {
-    const reports = this._mockChildrenMap.get(node.user.id) || [];
-    node.childrenLoaded = true;
-    node.directReports = reports.map(u => {
-      const hasKids = (this._mockChildrenMap.get(u.id) || []).length > 0;
-      return {
-        user:           u,
-        directReports:  [],
-        isExpanded:     remaining > 1,
-        childrenLoaded: remaining <= 1 ? !hasKids : false,
-        level:          node.level + 1,
-      };
-    });
-    if (remaining > 1) node.directReports.forEach(c => this._loadMockChildren(c, remaining - 1));
+  public async getPresence(userIds?: string[]): Promise<Map<string, PresenceAvailability>> {
+    const ids = userIds
+      ? userIds.map(id => id.toLowerCase())
+      : (await this.getAllUsers()).map(u => u.id);
+    await delay(200);
+    const presence = new Map<string, PresenceAvailability>();
+    for (const id of ids) presence.set(id, PRESENCE_POOL[hashCode(id) % PRESENCE_POOL.length]);
+    return presence;
   }
 }

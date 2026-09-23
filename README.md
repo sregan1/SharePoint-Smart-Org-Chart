@@ -30,6 +30,8 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | **Three layouts** | Drill-Down, Top Down, and Left to Right |
 | **Lazy expand** | Branches fetched from Graph on demand when expanded |
 | **Expand All** | Loads and expands the full organization from Microsoft Graph in one click |
+| **Total & direct headcount** | Every card shows direct reports and, when larger, the total headcount below that person at every level |
+| **Keyboard navigation** | Arrow keys and Home/End move between cards in the tree layouts; the search dropdown supports arrow keys and Enter |
 | **View from person** | Re-root the chart at any person without changing the admin configuration |
 | **Department filter** | Narrow the chart to one or more departments |
 | **User type filter** | Show or hide members and guest users independently |
@@ -44,15 +46,17 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 |---|---|
 | **Profile photos** | Loaded from Microsoft Graph with base64 caching; initials avatar as fallback |
 | **Presence badges** | Live availability from Microsoft Teams, refreshed every 60 seconds |
-| **Person profile card** | Full card with manager chain, action buttons (Chat, Email, Focus) |
+| **Person profile card** | Full card with manager chain, dotted-line relationships, custom attributes, headcount, and action buttons (Chat, Email, Focus) |
+| **Custom Attributes** | Admin-configured Entra ID fields (Employee ID, Cost Center, etc. — up to 10) shown on Directory cards/columns and the profile card |
 
 ### Admin & Personalization
 
 | Feature | Detail |
 |---|---|
 | **User account filters** | Hide disabled accounts, guests, accounts without a job title or department; exclude by name/email pattern; restrict to tenant domain — reports of a hidden manager are re-linked to the next visible manager, so hiding an account never orphans part of the org chart |
-| **Themes** | Modern, Minimal, Corporate, and Dark |
+| **Themes** | Modern, Minimal, Corporate, Dark, and Custom (pick your own accent color, with a built-in contrast check) |
 | **Configurable data source** | Graph API (real-time), SharePoint Search (legacy), or Auto (Graph with SP Search fallback) |
+| **Local data caching** | User/org data is cached locally for up to 4 hours; a header-bar **Refresh data** button forces an immediate reload |
 | **User preferences** | Per-user card size, font size, visible fields, compact mode — saved to `localStorage` |
 | **Configurable zoom & font size** | Admin sets defaults; users can override font size in their own preferences |
 | **Demo mode** | Built-in mock data (150 / 500 / 1,000 people) — no Graph permissions needed; auto-fills Top-Level User with the sample CEO if it's empty |
@@ -69,8 +73,8 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | ![Employee Directory card grid](docs/screenshots/03-directory-overview.png) | ![Org Chart drill-down view](docs/screenshots/06-orgchart-drill.png) |
 | **Top Down tree** | **Person profile card** |
 | ![Top Down tree layout](docs/screenshots/08-orgchart-vertical.png) | ![Person profile card with presence and action buttons](docs/screenshots/12-person-card.png) |
-| **Department filter** | **Dark theme** |
-| ![Department filter dropdown](docs/screenshots/11-orgchart-deptfilter.png) | ![Dark theme org chart](docs/screenshots/15-theme-dark.png) |
+| **Department filter** | **Custom theme** |
+| ![Department filter dropdown](docs/screenshots/11-orgchart-deptfilter.png) | ![Custom theme org chart](docs/screenshots/15-theme-custom.png) |
 
 See the **[User Guide](USER-GUIDE.md)** for the full screenshot tour and feature walkthroughs.
 
@@ -172,7 +176,7 @@ All settings below are configured in the web part property pane (edit the page �
 
 | Setting | Default | Description |
 |---|---|---|
-| **Chart Theme** | Modern | Modern, Minimal, Corporate, or Dark |
+| **Chart Theme** | Modern | Modern, Minimal, Corporate, Dark, or Custom (pick your own accent color via a color picker, with a live contrast check) |
 | **Default Font Size** | 100% | Starting text scale for all users (75%–175%); users can override in preferences |
 | **Default Org Chart Layout** | Drill-Down | Drill-Down, Top Down, or Left to Right |
 
@@ -183,6 +187,12 @@ All settings below are configured in the web part property pane (edit the page �
 | **Data Source** | Auto | Auto (Graph with SP Search fallback), Graph API, or SharePoint Search |
 
 > Graph API is strongly recommended. New users and manager changes appear immediately — no indexing delay.
+>
+> User/org data is cached locally for up to 4 hours to avoid re-downloading the whole directory on every page load. Use the **Refresh data** button in the header bar to force an immediate reload.
+
+### Custom Attributes
+
+Surface up to 10 additional Entra ID fields on Directory cards/columns and the Org Chart profile card — e.g. `employeeId`, `companyName`, `city`, or an on-premises AD extension attribute (`extensionAttribute1`–`extensionAttribute15`) for things like cost center or building. Each entry has a display label and independent "Show in Directory" / "Show in Org Chart" toggles. Requires the Graph API or Auto data source.
 
 ### User Filters
 
@@ -201,6 +211,7 @@ All settings below are configured in the web part property pane (edit the page �
 |---|---|---|
 | **Top-Level User** | _(required)_ | UPN or email of the root person (e.g. `ceo@company.com`) |
 | **Levels to load below root** | 3 | How many hierarchy levels to fetch on initial load (1–8) |
+| **Dotted-line manager attribute** | _(empty)_ | Optional on-premises AD extension attribute (`extensionAttribute1`–`15`) holding a secondary "dotted line" manager's email/UPN; shown on the profile card. Requires Graph API. |
 | **Default Org Chart Zoom** | Auto-fit | Starting zoom: Auto-fit, 50%, 75%, 100%, 125%, or 150% |
 
 ### Org Chart Features
@@ -260,6 +271,8 @@ The web part requires two delegated Microsoft Graph permissions, approved once p
 2. Find the pending requests for **Microsoft Graph — User.Read.All** and **Microsoft Graph — Presence.Read.All**.
 3. Select each and click **Approve**.
 
+> **Government cloud tenants (GCC High, DoD):** No configuration is needed. The web part calls Microsoft Graph through SharePoint's built-in Graph client, which automatically targets the correct Graph endpoint (`graph.microsoft.com`, `graph.microsoft.us`, etc.) for the cloud your tenant is registered in.
+
 ---
 
 ## Project Structure
@@ -277,15 +290,21 @@ SharePointSmartOrgChart/
 │   └── smart-org-chart.sppkg        # Pre-built deployment package
 ├── src/
 │   ├── services/
-│   │   ├── GraphService.ts          # Microsoft Graph calls, photo caching, org tree builder
+│   │   ├── GraphService.ts          # Microsoft Graph calls, photo caching, org tree builder,
+│   │   │                            #   headcount, custom attributes
 │   │   ├── MockGraphService.ts      # Demo data service
-│   │   └── PdfExportService.ts      # PDF and CSV export
+│   │   ├── PdfExportService.ts      # PDF and CSV export
+│   │   ├── persistentCache.ts       # IndexedDB-backed local cache for user/org data
+│   │   └── requestUtils.ts          # Shared retry/backoff helper for Graph & SP requests
 │   └── webparts/smartOrgChart/
 │       ├── SmartOrgChartWebPart.ts  # Web part entry + property pane
 │       └── components/
 │           ├── SmartOrgChart.tsx    # Root component — header, view switcher
+│           ├── colorUtils.ts        # Shared accent-color/contrast helpers (Custom theme)
 │           ├── EmployeeDirectory/   # Directory view (grid, list, filters, export)
-│           ├── OrgChart/            # Chart view (all three layouts)
+│           ├── OrgChart/            # Chart view (all three layouts), split into focused
+│           │                        #   modules: OrgTree, OrgNodeCard, PersonCard, DrillView,
+│           │                        #   OrgChartToolbar, orgTreeUtils, orgTheme, chartPersistence
 │           └── SettingsPanel/       # User preferences panel
 ├── USER-GUIDE.md                    # End-user documentation
 ├── CHANGELOG.md                     # Version history
@@ -311,7 +330,9 @@ SharePointSmartOrgChart/
 
 **Org Chart shows "User not found"** — Check that **Top-Level User** contains a valid UPN or email (e.g. `john.doe@company.com`), not a display name.
 
-**New users or manager changes not appearing** — Switch the Data Source setting to **Graph API** or **Auto**. SharePoint Search can take hours to index changes.
+**New users or manager changes not appearing** — Switch the Data Source setting to **Graph API** or **Auto**. SharePoint Search can take hours to index changes. On the Graph data source, also try the **Refresh data** button in the header bar — data is cached locally for up to 4 hours between page loads.
+
+**Custom Attributes show no value** — Confirm the Data Source is **Graph API** or **Auto** (SharePoint Search cannot read Entra ID attributes), that the field name is spelled correctly (see [Custom Attributes](#custom-attributes)), and that the field actually has a value set for that user in Azure AD.
 
 **Disabled / former employees still showing** — Open the property pane → User Filters and enable **Hide disabled accounts**. Requires the Graph API data source; SharePoint Search does not expose account status.
 
@@ -330,6 +351,8 @@ SharePointSmartOrgChart/
 - `User.Read.All` and `Presence.Read.All` are tenant-wide delegated permissions — a Global or SharePoint Administrator must approve them once for the whole tenant.
 - Presence status requires users to be licensed for Microsoft Teams.
 - User preferences (card size, font scale, etc.) are stored in browser `localStorage` and are not roamed across devices or browsers.
+- User/org data is cached locally (in-memory and in the browser's IndexedDB) for up to 4 hours; use the **Refresh data** header button to force an immediate reload.
+- Custom Attributes require the Graph API data source — SharePoint Search has no generic way to read Entra ID attributes.
 - Node.js 18 LTS is required to build from source. SPFx 1.18 is not compatible with Node 20+.
 
 ---

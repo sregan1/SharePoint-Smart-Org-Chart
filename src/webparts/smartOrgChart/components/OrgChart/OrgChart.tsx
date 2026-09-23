@@ -1,670 +1,45 @@
 import * as React from 'react';
 import { Spinner, SpinnerSize } from '@fluentui/react/lib/Spinner';
 import { Icon } from '@fluentui/react/lib/Icon';
-import { TextField } from '@fluentui/react/lib/TextField';
-import { SearchBox } from '@fluentui/react/lib/SearchBox';
-import { PrimaryButton, DefaultButton } from '@fluentui/react/lib/Button';
+import { DefaultButton } from '@fluentui/react/lib/Button';
 import { IGraphUser, IOrgNode, PresenceAvailability } from '../../../../services/GraphService';
 import { exportOrgChartToPdf, exportOrgChartToCsv } from '../../../../services/PdfExportService';
 import { IOrgChartProps, IOrgChartState } from './IOrgChartProps';
-import { PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
+import { getInitials } from '../personUtils';
 import styles from './OrgChart.module.scss';
+import {
+  IFilterCounts, IOrgStats, IRenderedNode,
+  buildIsVisible, collapseAll, collectTreeIds, computeStats, computeVisibleIds,
+  countSearchMatches, countTreeUsers, dedupeUsers, expandLoaded, expandToMatches,
+  filterTreeForExport, getRenderedNodes, getUniqueDepts, getUnloadedFrontier,
+  injectChildren, injectChildrenBatch, markNodesLoaded, matchUserQuery, prepareTree, setNodeExpanded,
+} from './orgTreeUtils';
+import {
+  ChartLayout, loadChartState, readUrlFocus, saveChartState, syncUrlFocus,
+} from './chartPersistence';
+import { OrgChartTheme, THEME_CONTAINER_CLASS, getThemeContainerStyle, getThemeTokens } from './orgTheme';
+import { PersonCard } from './PersonCard';
+import { OrgTree } from './OrgTree';
+import { DrillView } from './DrillView';
+import { NoConfigForm, UserFilterKey } from './ChartControls';
+import { OrgChartToolbar } from './OrgChartToolbar';
 
-/* ── Tree mutation helpers ───────────────── */
-
-function cloneTree(node: IOrgNode): IOrgNode {
-  return { ...node, directReports: node.directReports.map(cloneTree) };
-}
-
-function setNodeExpanded(root: IOrgNode, targetId: string, expanded: boolean): IOrgNode {
-  if (root.user.id === targetId) return { ...root, isExpanded: expanded, directReports: root.directReports.map(cloneTree) };
-  return { ...root, directReports: root.directReports.map(c => setNodeExpanded(c, targetId, expanded)) };
-}
-
-function injectChildren(root: IOrgNode, targetId: string, children: IOrgNode[]): IOrgNode {
-  if (root.user.id === targetId) return { ...root, directReports: children, childrenLoaded: true, isExpanded: true };
-  return { ...root, directReports: root.directReports.map(c => injectChildren(c, targetId, children)) };
-}
-
-function collapseAll(node: IOrgNode): IOrgNode {
-  return { ...node, isExpanded: false, directReports: node.directReports.map(collapseAll) };
-}
-
-function expandLoaded(node: IOrgNode): IOrgNode {
-  return { ...node, isExpanded: node.directReports.length > 0, directReports: node.directReports.map(expandLoaded) };
-}
-
-// Expands every ancestor of a node matching the query so search hits inside
-// collapsed branches become visible. Only already-loaded nodes are affected.
-function expandToMatches(node: IOrgNode, lowerQ: string): { node: IOrgNode; hasMatch: boolean } {
-  const children = node.directReports.map(c => expandToMatches(c, lowerQ));
-  const childMatch = children.some(c => c.hasMatch);
-  return {
-    node: { ...node, directReports: children.map(c => c.node), isExpanded: node.isExpanded || childMatch },
-    hasMatch: childMatch || matchesQuery(node, lowerQ),
-  };
-}
-
-// Returns true if this node or any descendant passes the visibility filter.
-// Used so ancestor nodes stay visible when a dept filter is active.
-function subtreeHasVisible(node: IOrgNode, isVisible: (u: IGraphUser) => boolean): boolean {
-  if (isVisible(node.user)) return true;
-  return node.directReports.some(c => subtreeHasVisible(c, isVisible));
-}
-
-// Prunes users hidden by the active filters (mirrors what OrgTree renders)
-function filterTreeForExport(node: IOrgNode, isVisible: (u: IGraphUser) => boolean): IOrgNode | null {
-  if (!isVisible(node.user)) return null;
-  const directReports = node.directReports
-    .map(c => filterTreeForExport(c, isVisible))
-    .filter((c): c is IOrgNode => c !== null);
-  return { ...node, directReports };
-}
-
-function markNodeLoaded(root: IOrgNode, targetId: string): IOrgNode {
-  if (root.user.id === targetId) return { ...root, childrenLoaded: true, directReports: [] };
-  return { ...root, directReports: root.directReports.map(c => markNodeLoaded(c, targetId)) };
-}
-
-// Every user id currently in the tree. Used to drop fetched reports that are
-// already present (self-managed accounts or manager cycles in Azure AD) —
-// without this, expanding re-injects an ancestor and recursion never ends.
-function collectTreeIds(node: IOrgNode, into: Set<string> = new Set<string>()): Set<string> {
-  into.add(node.user.id);
-  node.directReports.forEach(c => collectTreeIds(c, into));
-  return into;
-}
-
-// Injects children for many nodes in a single traversal — one full-tree clone
-// per batch instead of one per node (injectChildren is O(tree) per call).
-function injectChildrenBatch(root: IOrgNode, childrenById: Map<string, IOrgNode[]>): IOrgNode {
-  const injected = childrenById.get(root.user.id);
-  if (injected !== undefined) {
-    return { ...root, childrenLoaded: true, isExpanded: true, directReports: injected };
-  }
-  return { ...root, directReports: root.directReports.map(c => injectChildrenBatch(c, childrenById)) };
-}
-
-function countSearchMatches(node: IOrgNode, q: string, isVisible: (u: IGraphUser) => boolean): number {
-  if (!isVisible(node.user)) return 0;
-  const self = matchesQuery(node, q) ? 1 : 0;
-  return self + node.directReports.reduce((s, c) => s + countSearchMatches(c, q, isVisible), 0);
-}
-
-function matchesQuery(node: IOrgNode, lowerQ: string): boolean {
-  return matchUserQuery(node.user, lowerQ);
-}
-
-function matchUserQuery(user: IGraphUser, lowerQ: string): boolean {
-  if (!lowerQ) return false;
-  return (
-    (user.displayName || '').toLowerCase().includes(lowerQ) ||
-    (user.jobTitle || '').toLowerCase().includes(lowerQ) ||
-    (user.department || '').toLowerCase().includes(lowerQ) ||
-    (user.mail || '').toLowerCase().includes(lowerQ)
-  );
-}
-
-function countTreeUsers(node: IOrgNode): { members: number; guests: number; disabled: number } {
-  const c = { members: 0, guests: 0, disabled: 0 };
-  const visit = (n: IOrgNode) => {
-    const u = n.user;
-    if (u.accountEnabled === false) c.disabled++;
-    else if (u.userType === 'Guest') c.guests++;
-    else c.members++;
-    n.directReports.forEach(visit);
-  };
-  visit(node);
-  return c;
-}
-
-
-function getUniqueDepts(node: IOrgNode): Map<string, number> {
-  const map = new Map<string, number>();
-  const visit = (n: IOrgNode) => {
-    const dept = n.user.department || '';
-    if (dept) map.set(dept, (map.get(dept) || 0) + 1);
-    n.directReports.forEach(visit);
-  };
-  visit(node);
-  return map;
-}
-
-function computeStats(users: IGraphUser[]): {
-  total: number; members: number; guests: number; depts: number;
-} {
-  let members = 0, guests = 0;
-  const deptSet = new Set<string>();
-  for (const u of users) {
-    if (u.department) deptSet.add(u.department);
-    if (u.userType === 'Guest') guests++;
-    else members++;
-  }
-  return { total: users.length, members, guests, depts: deptSet.size };
-}
-
-/* ── Department color palettes & themes ──── */
-
-import { OrgChartTheme } from '../ISmartOrgChartProps';
 export type { OrgChartTheme };
-
-function getSiteColor(theme: OrgChartTheme): string {
-  if (theme === 'corporate') return '#0052a5';
-  try {
-    const t = (window as any).__themeState__?.theme;
-    if (!t) return theme === 'dark' ? '#71afe5' : '#0078d4';
-    return theme === 'dark' ? (t.themeTertiary ?? '#71afe5') : (t.themePrimary ?? '#0078d4');
-  } catch {
-    return theme === 'dark' ? '#71afe5' : '#0078d4';
-  }
-}
-
-const THEME_CONTAINER_CLASS: Record<OrgChartTheme, string> = {
-  modern:    '',
-  minimal:   styles.themeMinimal,
-  corporate: styles.themeCorporate,
-  dark:      styles.themeDark,
-};
-
-/* ── Presence helpers ────────────────────── */
-
-const PresenceDot: React.FC<{ status: PresenceAvailability | undefined }> = ({ status }) => {
-  if (!status || status === 'Unknown') return null;
-  return <span className={styles.presenceDot} style={{ background: PRESENCE_COLOR[status] }} />;
-};
-
-/* ── Person Card (Outlook-style popup) ───── */
-
-interface IPersonCardProps {
-  user: IGraphUser;
-  photo: string | null;
-  presence: PresenceAvailability | undefined;
-  theme: OrgChartTheme;
-  managerChain: IGraphUser[];
-  dottedManager: IGraphUser | null;
-  dottedReports: IGraphUser[];
-  onClose: () => void;
-  onFocus: (user: IGraphUser) => void;
-}
-
-const PersonCard: React.FC<IPersonCardProps> = ({
-  user, photo, presence, theme, managerChain, dottedManager, dottedReports, onClose, onFocus
-}) => {
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [onClose]);
-
-  // Land keyboard/screen-reader focus inside the dialog when it opens
-  const closeBtnRef = React.useRef<HTMLButtonElement>(null);
-  React.useEffect(() => { if (closeBtnRef.current) closeBtnRef.current.focus(); }, []);
-
-  // Transient "Copied!" feedback for the copy buttons
-  const mountedRef = React.useRef(true);
-  React.useEffect(() => () => { mountedRef.current = false; }, []);
-  const [copied, setCopied] = React.useState('');
-  const copy = (text: string, label: string): void => {
-    const done = (): void => {
-      if (!mountedRef.current) return;
-      setCopied(label);
-      window.setTimeout(() => { if (mountedRef.current) setCopied(''); }, 2000);
-    };
-    try { navigator.clipboard.writeText(text).then(done).catch(done); } catch { done(); }
-  };
-
-  const deptColor = getSiteColor(theme);
-  const isDark = theme === 'dark';
-  const initials = getInitials(user.displayName);
-  const isDisabled = user.accountEnabled === false;
-  const isGuest = user.userType === 'Guest';
-
-  const cardBg    = isDark ? '#242740' : '#ffffff';
-  const textColor = isDark ? '#f0f0f0' : '#1a1a2e';
-  const subColor  = isDark ? '#a0a8c0' : '#555';
-  const fieldBg   = isDark ? '#1e2138' : '#f8f9fb';
-  const borderClr = isDark ? '#3a3d5c' : '#e8ecf0';
-  const chainBg   = isDark ? '#1a1c2e' : '#f2f4f8';
-
-  return (
-    <div className={styles.personCardOverlay} onClick={onClose}>
-      <div
-        className={styles.personCard}
-        style={{ background: cardBg, borderColor: borderClr }}
-        onClick={e => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label={`Profile: ${user.displayName}`}
-      >
-        {/* Colored header band */}
-        <div className={styles.personCardHeader} style={{ background: deptColor }}>
-          <button ref={closeBtnRef} className={styles.personCardClose} onClick={onClose} title="Close" aria-label="Close profile">
-            <Icon iconName="Cancel" />
-          </button>
-          {photo
-            ? <img src={photo} alt={user.displayName} className={styles.personCardPhoto} />
-            : <div className={styles.personCardInitials}>{initials}</div>
-          }
-          {presence && presence !== 'Unknown' && (
-            <div className={styles.personCardPresence}>
-              <span className={styles.personCardPresenceDot} style={{ background: PRESENCE_COLOR[presence] }} />
-              <span>{PRESENCE_LABEL[presence]}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Body */}
-        <div className={styles.personCardBody}>
-          <div className={styles.personCardName} style={{ color: textColor }}>{user.displayName}</div>
-          {user.jobTitle && (
-            <div className={styles.personCardTitle} style={{ color: deptColor }}>{user.jobTitle}</div>
-          )}
-
-          {/* Badges */}
-          <div className={styles.personCardBadges}>
-            {user.department && (
-              <span className={styles.personCardDeptBadge} style={{ background: `${deptColor}1a`, color: deptColor }}>
-                {user.department}
-              </span>
-            )}
-            {isDisabled && <span className={styles.personCardStatusBadge} style={{ background: '#fde7e9', color: '#c50f1f' }}>Disabled</span>}
-            {isGuest   && <span className={styles.personCardStatusBadge} style={{ background: '#fff4ce', color: '#835c00' }}>Guest</span>}
-          </div>
-
-          {/* Info fields */}
-          <div className={styles.personCardFields} style={{ background: fieldBg, borderColor: borderClr }}>
-            {user.mail && (
-              <div className={styles.personCardField}>
-                <Icon iconName="Mail" className={styles.personCardFieldIcon} style={{ color: deptColor }} />
-                <a href={`mailto:${user.mail}`} className={styles.personCardFieldLink} style={{ color: deptColor }}>{user.mail}</a>
-                <button
-                  onClick={() => copy(user.mail, 'email')}
-                  title="Copy email address"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: subColor, padding: '2px 4px' }}
-                >
-                  <Icon iconName={copied === 'email' ? 'CheckMark' : 'Copy'} />
-                </button>
-              </div>
-            )}
-            {user.businessPhones && user.businessPhones[0] && (
-              <div className={styles.personCardField}>
-                <Icon iconName="Phone" className={styles.personCardFieldIcon} style={{ color: subColor }} />
-                <a href={`tel:${user.businessPhones[0]}`} className={styles.personCardFieldText} style={{ color: subColor }}>{user.businessPhones[0]}</a>
-              </div>
-            )}
-            {user.mobilePhone && (
-              <div className={styles.personCardField}>
-                <Icon iconName="CellPhone" className={styles.personCardFieldIcon} style={{ color: subColor }} />
-                <a href={`tel:${user.mobilePhone}`} className={styles.personCardFieldText} style={{ color: subColor }}>{user.mobilePhone}</a>
-              </div>
-            )}
-            {user.officeLocation && (
-              <div className={styles.personCardField}>
-                <Icon iconName="POI" className={styles.personCardFieldIcon} style={{ color: subColor }} />
-                <span className={styles.personCardFieldText} style={{ color: subColor }}>{user.officeLocation}</span>
-              </div>
-            )}
-          </div>
-
-          {/* Reporting chain */}
-          {managerChain.length > 0 && (
-            <div className={styles.personCardChain} style={{ background: chainBg, borderColor: borderClr }}>
-              <div className={styles.personCardChainLabel} style={{ color: subColor }}>Reports to</div>
-              <div className={styles.personCardChainItems}>
-                {managerChain.map((mgr, i) => (
-                  <React.Fragment key={mgr.id}>
-                    {i > 0 && <Icon iconName="ChevronRight" className={styles.personCardChainSep} style={{ color: subColor }} />}
-                    <button
-                      className={styles.personCardChainChip}
-                      onClick={() => { onClose(); onFocus(mgr); }}
-                      title={`Focus on ${mgr.displayName}`}
-                    >
-                      <span
-                        className={styles.personCardChainInitials}
-                        style={{ background: getSiteColor(theme) }}
-                      >
-                        {getInitials(mgr.displayName)}
-                      </span>
-                      <span className={styles.personCardChainName} style={{ color: textColor }}>
-                        {mgr.displayName.split(' ')[0]}
-                      </span>
-                    </button>
-                  </React.Fragment>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Dotted-line relationships */}
-          {(dottedManager || dottedReports.length > 0) && (
-            <div className={styles.personCardChain} style={{ background: chainBg, borderColor: borderClr }}>
-              <div className={styles.personCardChainLabel} style={{ color: subColor }}>Dotted line</div>
-              <div className={styles.personCardChainItems}>
-                {dottedManager && (
-                  <button
-                    className={styles.personCardChainChip}
-                    onClick={() => { onClose(); onFocus(dottedManager); }}
-                    title={`Dotted-line manager: ${dottedManager.displayName}`}
-                  >
-                    <span className={styles.personCardChainInitials} style={{ background: getSiteColor(theme) }}>
-                      {getInitials(dottedManager.displayName)}
-                    </span>
-                    <span className={styles.personCardChainName} style={{ color: textColor }}>
-                      ↑ {dottedManager.displayName.split(' ')[0]}
-                    </span>
-                  </button>
-                )}
-                {dottedReports.map(rep => (
-                  <button
-                    key={rep.id}
-                    className={styles.personCardChainChip}
-                    onClick={() => { onClose(); onFocus(rep); }}
-                    title={`Dotted-line report: ${rep.displayName}`}
-                  >
-                    <span className={styles.personCardChainInitials} style={{ background: getSiteColor(theme) }}>
-                      {getInitials(rep.displayName)}
-                    </span>
-                    <span className={styles.personCardChainName} style={{ color: textColor }}>
-                      ↓ {rep.displayName.split(' ')[0]}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Action buttons */}
-          {user.mail && (
-            <div className={styles.personCardActions}>
-              <a
-                href={`https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(user.mail)}`}
-                target="_blank" rel="noopener noreferrer"
-                className={styles.personCardAction}
-                style={{ background: deptColor, color: '#fff' }}
-              >
-                <Icon iconName="Chat" />&nbsp;Chat
-              </a>
-              <a
-                href={`mailto:${user.mail}`}
-                className={styles.personCardAction}
-                style={{ background: isDark ? '#3a3d5c' : '#eef0f4', color: isDark ? '#e0e0f0' : '#333' }}
-              >
-                <Icon iconName="Mail" />&nbsp;Email
-              </a>
-              <button
-                className={styles.personCardAction}
-                style={{ background: isDark ? '#3a3d5c' : '#eef0f4', color: isDark ? '#e0e0f0' : '#333', border: 'none', cursor: 'pointer' }}
-                onClick={() => { onClose(); onFocus(user); }}
-                title="Focus org chart on this person"
-              >
-                <Icon iconName="Org" />&nbsp;Focus
-              </button>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-/* ── Filter dropdown ─────────────────────── */
-
-interface IFilterCounts { members: number; guests: number; disabled: number; }
-
-interface IFilterPanelProps {
-  filterMembers: boolean;
-  filterGuests: boolean;
-  counts: IFilterCounts;
-  onToggle: (key: 'members' | 'guests') => void;
-}
-
-const FilterPanel: React.FC<IFilterPanelProps> = ({ filterMembers, filterGuests, counts, onToggle }) => {
-  const items: Array<{ key: 'members' | 'guests'; label: string; count: number; checked: boolean }> = [
-    { key: 'members',  label: 'Regular members',   count: counts.members,  checked: filterMembers  },
-    { key: 'guests',   label: 'Guest users',        count: counts.guests,   checked: filterGuests   },
-  ];
-  return (
-    <div className={styles.filterPanel}>
-      <div className={styles.filterPanelTitle}>Show in chart</div>
-      {items.map(({ key, label, count, checked }) => (
-        <label key={key} className={styles.filterItem}>
-          <input type="checkbox" checked={checked} onChange={() => onToggle(key)} className={styles.filterCheckbox} />
-          <span className={styles.filterLabel}>{label}</span>
-          <span className={styles.filterCount}>{count}</span>
-        </label>
-      ))}
-    </div>
-  );
-};
-
-/* ── Node card ───────────────────────────── */
-
-interface IOrgNodeCardProps {
-  node: IOrgNode;
-  photos: { [id: string]: string | null };
-  presenceMap: Map<string, PresenceAvailability>;
-  showDepartment: boolean;
-  showOffice: boolean;
-  isExpanding: boolean;
-  searchQuery: string;
-  theme: OrgChartTheme;
-  directReportCount: number;
-  managerUser?: IGraphUser;
-  compactCards: boolean;
-  onToggle: (node: IOrgNode) => void;
-  onCardClick: (user: IGraphUser) => void;
-  onFocus: (user: IGraphUser) => void;
-}
-
-const OrgNodeCard: React.FC<IOrgNodeCardProps> = ({
-  node, photos, presenceMap, showDepartment, showOffice, isExpanding,
-  searchQuery, theme, directReportCount, managerUser,
-  compactCards, onToggle, onCardClick, onFocus
-}) => {
-  const { user } = node;
-  const photo     = photos[user.id];
-  const deptColor = getSiteColor(theme);
-  const isDark    = theme === 'dark';
-  const initials  = getInitials(user.displayName);
-  const isRoot    = node.level === 0;
-
-  const hasReports    = node.directReports.length > 0 || !node.childrenLoaded;
-  const isHighlighted = searchQuery.trim() ? matchesQuery(node, searchQuery.toLowerCase()) : false;
-  const isDisabled    = user.accountEnabled === false;
-  const isGuest       = user.userType === 'Guest';
-
-  const levelClass   = isRoot ? styles.rootCard : node.level === 1 ? styles.level1Card : '';
-  const compactClass = compactCards ? styles.compactCard : '';
-  const classes      = [styles.nodeCard, levelClass, compactClass, isHighlighted ? styles.highlightedCard : ''].filter(Boolean).join(' ');
-
-  const borderStyle = theme === 'minimal'
-    ? { borderLeft: `3px solid ${deptColor}`, borderTop: '1px solid #d8d8d8', opacity: isDisabled ? 0.55 : 1 }
-    : { borderTopColor: deptColor, opacity: isDisabled ? 0.55 : 1 };
-
-  const countLabel = directReportCount;
-
-  return (
-    <div
-      className={classes}
-      style={{ ...borderStyle, cursor: 'pointer', position: 'relative' }}
-      title={`View ${user.displayName}'s profile`}
-      onClick={() => onCardClick(user)}
-      onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onCardClick(user); } }}
-      role="button"
-      tabIndex={0}
-      aria-label={`View ${user.displayName}'s profile`}
-    >
-      {/* Focus button — shown on hover */}
-      <button
-        className={styles.focusBtn}
-        onClick={e => { e.stopPropagation(); onFocus(user); }}
-        title={`Focus org chart on ${user.displayName}`}
-      >
-        <Icon iconName="FitPage" />
-      </button>
-
-      <div className={styles.nodeAvatar}>
-        {photo
-          ? <img src={photo} alt={user.displayName} className={styles.photo} style={{ opacity: 0, transition: 'opacity 0.35s ease' }} onLoad={e => { (e.currentTarget as HTMLImageElement).style.opacity = '1'; }} />
-          : <div className={styles.initials} style={{ background: deptColor }}>{initials}</div>
-        }
-        <PresenceDot status={presenceMap.get(user.id)} />
-      </div>
-      <div className={styles.nodeName} title={user.displayName}>{user.displayName}</div>
-      {user.jobTitle && (
-        <div className={styles.nodeTitle} title={user.jobTitle} style={{ color: deptColor }}>
-          {user.jobTitle}
-        </div>
-      )}
-      {showDepartment && user.department && !isGuest && !isDisabled && (
-        <div className={styles.nodeDept}>{user.department}</div>
-      )}
-      {showOffice && user.officeLocation && !isGuest && !isDisabled && (
-        <div className={styles.nodeOffice}>
-          <Icon iconName="POI" className={styles.nodeOfficeIcon} />
-          {user.officeLocation}
-        </div>
-      )}
-      {!showDepartment && managerUser && !isGuest && !isDisabled && (
-        <div className={styles.managerLine} style={{ color: isDark ? '#8090b0' : '#999' }}>
-          ↑ {managerUser.displayName.split(' ')[0]}
-        </div>
-      )}
-      {(isGuest || isDisabled) && (
-        <div
-          className={styles.nodeDept}
-          style={{ background: isDisabled ? '#fde7e9' : '#fff4ce', color: isDisabled ? '#c50f1f' : '#835c00' }}
-        >
-          {isDisabled ? 'Disabled' : 'Guest'}
-        </div>
-      )}
-      {hasReports && (
-        <button
-          className={styles.expandBtn}
-          onClick={e => { e.stopPropagation(); onToggle(node); }}
-          title={node.isExpanded ? 'Collapse' : 'Expand'}
-          aria-expanded={node.isExpanded}
-        >
-          {isExpanding
-            ? <Icon iconName="ProgressRingDots" className={styles.spinning} />
-            : (
-              <>
-                <Icon iconName={node.isExpanded ? 'ChevronUp' : 'ChevronDown'} />
-                {countLabel > 0 && <span className={styles.reportCount}>{countLabel}</span>}
-              </>
-            )
-          }
-        </button>
-      )}
-    </div>
-  );
-};
-
-/* ── Recursive tree ──────────────────────── */
-
-interface IOrgTreeProps {
-  node: IOrgNode;
-  photos: { [id: string]: string | null };
-  presenceMap: Map<string, PresenceAvailability>;
-  showDepartment: boolean;
-  showOffice: boolean;
-  expandingNodes: Set<string>;
-  searchQuery: string;
-  theme: OrgChartTheme;
-  isVisible: (user: IGraphUser) => boolean;
-  parentUser?: IGraphUser;
-  compactCards: boolean;
-  onToggle: (node: IOrgNode) => void;
-  onCardClick: (user: IGraphUser) => void;
-  onFocus: (user: IGraphUser) => void;
-}
-
-const OrgTree: React.FC<IOrgTreeProps> = ({
-  node, photos, presenceMap, showDepartment, showOffice,
-  expandingNodes, searchQuery, theme, isVisible, parentUser, compactCards,
-  onToggle, onCardClick, onFocus
-}) => {
-  if (!subtreeHasVisible(node, isVisible)) return null;
-
-  const visibleReports     = node.directReports.filter(c => subtreeHasVisible(c, isVisible));
-  const hasVisibleChildren = node.isExpanded && visibleReports.length > 0;
-
-  return (
-    <div className={`${styles.nodeWrapper} ${hasVisibleChildren ? styles.hasChildren : ''}`}>
-      <OrgNodeCard
-        node={node}
-        photos={photos}
-        presenceMap={presenceMap}
-        showDepartment={showDepartment}
-        showOffice={showOffice}
-        isExpanding={expandingNodes.has(node.user.id)}
-        searchQuery={searchQuery}
-        theme={theme}
-        directReportCount={visibleReports.length}
-        managerUser={parentUser}
-        compactCards={compactCards}
-        onToggle={onToggle}
-        onCardClick={onCardClick}
-        onFocus={onFocus}
-      />
-      {hasVisibleChildren && (
-        <div className={styles.children}>
-          {visibleReports.map(child => (
-            <OrgTree
-              key={child.user.id}
-              node={child}
-              photos={photos}
-              presenceMap={presenceMap}
-              showDepartment={showDepartment}
-              showOffice={showOffice}
-              expandingNodes={expandingNodes}
-              searchQuery={searchQuery}
-              theme={theme}
-              isVisible={isVisible}
-              parentUser={node.user}
-              compactCards={compactCards}
-              onToggle={onToggle}
-              onCardClick={onCardClick}
-              onFocus={onFocus}
-            />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
-/* ── No-config form ──────────────────────── */
-
-const NoConfigForm: React.FC<{ onLoad: (id: string) => void }> = ({ onLoad }) => {
-  const [val, setVal] = React.useState('');
-  return (
-    <div className={styles.noConfig}>
-      <Icon iconName="Org" className={styles.noConfigIcon} />
-      <div className={styles.noConfigTitle}>Set Up the Org Chart</div>
-      <div className={styles.noConfigSubtitle}>Enter the top-level person&apos;s email or UPN to get started.</div>
-      <div className={styles.noConfigForm}>
-        <TextField placeholder="ceo@company.com" value={val} onChange={(_, v) => setVal(v || '')} className={styles.noConfigInput} />
-        <PrimaryButton text="Load" onClick={() => val.trim() && onLoad(val.trim())} disabled={!val.trim()} />
-      </div>
-      <div className={styles.noConfigHint}>You can also set this permanently in the web part settings (admin).</div>
-    </div>
-  );
-};
 
 /* ── Main OrgChart component ─────────────── */
 
-type ChartLayout = 'drill' | 'vertical' | 'horizontal';
-
 interface IOrgChartLocalState extends IOrgChartState {
-  searchQuery: string;
+  /** Debounced, lower-cased query that drives highlighting, counts and results */
+  appliedQuery: string;
+  /** Keyboard-highlighted row in the search results listbox (-1 = none) */
+  searchActiveIndex: number;
   presenceMap: Map<string, PresenceAvailability>;
   zoomLevel: number;
   selectedUser: IGraphUser | null;
   showFilters: boolean;
-  isDragging: boolean;
   filterMembers: boolean;
   filterGuests: boolean;
+  filterDisabled: boolean;
   // Focus / navigation (full-tree mode)
   focusedUser: IGraphUser | null;
   ancestorChain: IGraphUser[];
@@ -690,116 +65,94 @@ interface IOrgChartLocalState extends IOrgChartState {
   rootPickerQuery: string;
   rootPickerResults: IGraphUser[];
   runtimeRootUser: IGraphUser | null;
+  /** Root chosen in the setup form when no topLevelUser is configured */
+  setupRootId: string;
+  /** Re-rooting with data already in memory — shown inline, not as a full-screen spinner */
+  isRefocusing: boolean;
+  isExpandingAll: boolean;
+  /** Tree card that holds the roving tab stop */
+  treeFocusId: string | null;
 }
 
-/* ── Chart state persistence ─────────────── */
+const SEARCH_DEBOUNCE_MS = 200;
+const PRESENCE_POLL_MS   = 60000;
+const MAX_SEARCH_RESULTS = 8;
 
-const LS_CHART_KEY = 'smartOrgChart_chartState';
+const EMPTY_IDS = new Set<string>();
 
-interface IChartStoredState {
-  chartLayout?: ChartLayout;
-  showStats?: boolean;
-  filterMembers?: boolean;
-  filterGuests?: boolean;
-  filterDepartments?: string[];
-  focusEmail?: string | null;
-}
-
-// Storage is scoped per web part instance — all SharePoint sites share one
-// origin, so a bare key would leak state between instances on different pages.
-// The un-scoped legacy key is read as a migration fallback.
-function chartStateKey(instanceId: string): string {
-  return instanceId ? `${LS_CHART_KEY}_${instanceId}` : LS_CHART_KEY;
-}
-
-function loadChartState(instanceId: string): IChartStoredState {
-  try {
-    const s = localStorage.getItem(chartStateKey(instanceId)) ?? localStorage.getItem(LS_CHART_KEY);
-    if (s) return JSON.parse(s) as IChartStoredState;
-  } catch { /* ignore */ }
-  return {};
-}
-
-function saveChartState(instanceId: string, s: IChartStoredState): void {
-  try { localStorage.setItem(chartStateKey(instanceId), JSON.stringify(s)); } catch { /* ignore */ }
-}
-
-/* ── Deep links (?socFocus=email) ────────── */
-
-const FOCUS_URL_PARAM = 'socFocus';
-
-function readUrlFocus(): string | null {
-  try { return new URLSearchParams(window.location.search).get(FOCUS_URL_PARAM); } catch { return null; }
-}
-
-
-function updateUrlFocus(email: string | null): void {
-  try {
-    const url = new URL(window.location.href);
-    if ((email || null) === url.searchParams.get(FOCUS_URL_PARAM)) return;
-    if (email) url.searchParams.set(FOCUS_URL_PARAM, email);
-    else url.searchParams.delete(FOCUS_URL_PARAM);
-    window.history.replaceState(null, '', url.toString());
-  } catch { /* ignore */ }
-}
-
-const LAYOUT_CYCLE: ChartLayout[] = ['drill', 'vertical', 'horizontal'];
-
-const LAYOUT_ICON: Record<ChartLayout, string> = {
-  drill:      'Org',
-  vertical:   'Down',
-  horizontal: 'Forward',
-};
-
-const LAYOUT_TITLE: Record<ChartLayout, string> = {
-  drill:      'Drill-Down',
-  vertical:   'Top Down',
-  horizontal: 'Left to Right',
-};
+const yieldToBrowser = (): Promise<void> => new Promise<void>(resolve => { window.setTimeout(resolve, 0); });
 
 export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalState> {
   private _mounted          = false;
+  private _uid              = `soc${Math.random().toString(36).slice(2, 8)}`;
   private _pendingFocusEmail: string | null = null;
+  // True until a deep-link / saved focus has been restored — persisting
+  // before then would record the default position and strip ?socFocus
+  private _restorePending   = false;
+  // The ?socFocus value this instance wrote — only that value may be removed
+  private _ownUrlFocus: string | null = null;
   private _presenceInterval: number | null = null;
-  private _scrollRef        = React.createRef<HTMLDivElement>();
-  private _drillViewRef     = React.createRef<HTMLDivElement>();
+  private _presenceTimer: number | null = null;
+  private _searchTimer: number | null = null;
+  private _scrollEl: HTMLDivElement | null = null;
   private _searchRef        = React.createRef<HTMLDivElement>();
+  private _rootPickerRef    = React.createRef<HTMLDivElement>();
+  private _drillHeaderRef   = React.createRef<HTMLDivElement>();
+  private _personCardOpener: HTMLElement | null = null;
   private _isPanning        = false;
   private _requestedReportCounts = new Set<string>();
+  private _requestedPhotos  = new Set<string>();
   private _panStartX        = 0;
   private _panStartY        = 0;
   private _scrollStartX     = 0;
   private _scrollStartY     = 0;
   private _panDistance      = 0;
   private _lastPanEndTime   = 0;
-  private _rootPickerRef    = React.createRef<HTMLDivElement>();
+  // Incremented by every navigation that replaces the view (load, focus,
+  // re-root) so late responses from a superseded request are dropped
+  private _navSeq           = 0;
+  // Incremented whenever the whole tree is replaced; long-running tree jobs
+  // (Expand All) stop when it changes
+  private _treeGen          = 0;
+  private _deptFilterValidated = false;
   // Tree snapshot taken when a search starts, restored when it is cleared.
-  // Any other tree mutation invalidates it (set to null).
+  // Tree edits made while searching are applied to it too (see _mutateTree).
   private _preSearchRoot: IOrgNode | null = null;
   // Per-render tree scans are cached by reference — the tree is immutable,
-  // so a changed rootNode/allUsers reference is the only invalidation signal
+  // so a changed rootNode/allUsers/filter reference is the only invalidation signal
   private _treeScanFor: IOrgNode | null = null;
   private _treeCounts: IFilterCounts = { members: 0, guests: 0, disabled: 0 };
   private _uniqueDepts: Map<string, number> = new Map();
   private _statsFor: IGraphUser[] | null = null;
-  private _stats: { total: number; members: number; guests: number; depts: number } | null = null;
+  private _stats: IOrgStats | null = null;
+  private _visKey: unknown[] = [];
+  private _visibleIds: Set<string> = EMPTY_IDS;
+  private _renderedFor: [IOrgNode | null, Set<string> | null] = [null, null];
+  private _rendered: IRenderedNode[] = [];
+  private _renderedIds: Set<string> = EMPTY_IDS;
+  private _matchKey: unknown[] = [];
+  private _matchCount = 0;
+  private _resultsKey: unknown[] = [];
+  private _results: IGraphUser[] = [];
 
   constructor(props: IOrgChartProps) {
     super(props);
     const stored = loadChartState(props.instanceId);
     // A shared deep link takes precedence over the user's own saved position
     this._pendingFocusEmail = readUrlFocus() || stored.focusEmail || null;
+    this._restorePending = !!this._pendingFocusEmail;
     // Stored preferences only apply while the admin has the matching control
     // enabled — otherwise users could be stuck in a state they can't change.
     this.state = {
       rootNode: null, isLoading: false, error: null,
       photos: {}, expandingNodes: new Set(), searchQuery: '',
+      appliedQuery: '', searchActiveIndex: -1,
       presenceMap: new Map(), zoomLevel: props.defaultZoom > 0 ? props.defaultZoom : 1,
       selectedUser: null,
       showFilters: false,
       filterMembers: props.enableUserFilter ? (stored.filterMembers ?? true) : true,
       filterGuests: props.enableUserFilter ? (stored.filterGuests ?? true) : true,
-      isDragging: false,
+      filterDisabled: props.enableUserFilter ? (stored.filterDisabled ?? true) : true,
       focusedUser: null, ancestorChain: [], allUsers: [],
       showSearchResults: false, personCardManagerChain: [],
       personCardDottedManager: null, personCardDottedReports: [],
@@ -814,36 +167,54 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       drillReportCounts: new Map(),
       showLayoutPicker: false,
       rootPickerQuery: '', rootPickerResults: [], runtimeRootUser: null,
+      setupRootId: '',
+      isRefocusing: false,
+      isExpandingAll: false,
+      treeFocusId: null,
     };
   }
 
   public async componentDidMount(): Promise<void> {
     this._mounted = true;
-    if (this.props.graphService && this.props.topLevelUser) await this._loadTree();
-    this._refreshPresence();
-    this._presenceInterval = window.setInterval(() => { this._refreshPresence(); }, 60_000);
-
-    if (this._scrollRef.current) {
-      this._scrollRef.current.addEventListener('touchmove', this._handleTouchMoveDirect, { passive: false });
-    }
+    // Register listeners before any await so an unmount mid-load can't leak them
     document.addEventListener('mousedown', this._handleOutsideClick);
     document.addEventListener('keydown', this._handleEscKey);
+    document.addEventListener('visibilitychange', this._handleVisibilityChange);
+    this._presenceInterval = window.setInterval(() => { this._refreshPresence(); }, PRESENCE_POLL_MS);
+    this._syncSearchAria();
+
+    if (this.props.graphService && this._getRootIdentifier()) await this._loadTree();
   }
 
   public async componentDidUpdate(prev: IOrgChartProps, prevState: IOrgChartLocalState): Promise<void> {
+    this._syncSearchAria();
+
+    const rootChanged = prev.topLevelUser !== this.props.topLevelUser;
     if (
-      prev.topLevelUser !== this.props.topLevelUser ||
+      rootChanged ||
       prev.levelsBelow  !== this.props.levelsBelow  ||
       (!prev.graphService && this.props.graphService)
     ) {
       this._requestedReportCounts.clear();
+      this._preSearchRoot = null;
+      this._clearSearchTimer();
+      this._treeGen++;
+      const runtimeRootUser = rootChanged ? null : this.state.runtimeRootUser;
+      // State updates here are batched, so resolve the identifier up front
+      const identifier = this.props.topLevelUser || (rootChanged ? '' : this.state.setupRootId);
       this.setState({
-        rootNode: null, error: null, searchQuery: '',
+        rootNode: null, error: null, searchQuery: '', appliedQuery: '', showSearchResults: false,
         focusedUser: null, ancestorChain: [],
         drillPath: [], drillReports: [], drillLoadingId: null,
         drillReportCounts: new Map(),
+        // A new admin-configured root supersedes any runtime/setup choice
+        runtimeRootUser,
+        setupRootId: rootChanged ? '' : this.state.setupRootId,
       });
-      if (this.props.graphService && this.props.topLevelUser) await this._loadTree();
+      if (this.props.graphService) {
+        if (runtimeRootUser) await this._loadTreeForUser(runtimeRootUser);
+        else await this._loadTree(false, identifier);
+      }
     }
 
     // Admin property pane edits re-render (not remount) this component, so
@@ -861,7 +232,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       this._setLayout(this.props.defaultLayout || 'drill');
     }
     if (prev.enableUserFilter && !this.props.enableUserFilter) {
-      this.setState({ filterMembers: true, filterGuests: true });
+      this.setState({ filterMembers: true, filterGuests: true, filterDisabled: true });
     }
     if (prev.enableDeptFilter && !this.props.enableDeptFilter) {
       this.setState({ filterDepartments: new Set() });
@@ -870,59 +241,82 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       this.setState({ showStats: false });
     }
 
+    const s = this.state;
     if (
-      prevState.rootNode          !== this.state.rootNode          ||
-      prevState.filterDepartments !== this.state.filterDepartments ||
-      prevState.filterMembers     !== this.state.filterMembers     ||
-      prevState.filterGuests      !== this.state.filterGuests      ||
-      prevState.zoomLevel         !== this.state.zoomLevel         ||
-      prevState.chartLayout       !== this.state.chartLayout
+      prevState.rootNode          !== s.rootNode          ||
+      prevState.filterDepartments !== s.filterDepartments ||
+      prevState.filterMembers     !== s.filterMembers     ||
+      prevState.filterGuests      !== s.filterGuests      ||
+      prevState.filterDisabled    !== s.filterDisabled    ||
+      prevState.zoomLevel         !== s.zoomLevel         ||
+      prevState.chartLayout       !== s.chartLayout
     ) {
       this._fixConnectorLines();
     }
 
-    const { isLoading, chartLayout, showStats, filterMembers, filterGuests,
-            filterDepartments, drillPath, focusedUser } = this.state;
-    if (!isLoading && (
-      prevState.chartLayout       !== chartLayout       ||
-      prevState.showStats         !== showStats         ||
-      prevState.filterMembers     !== filterMembers     ||
-      prevState.filterGuests      !== filterGuests      ||
-      prevState.filterDepartments !== filterDepartments ||
-      prevState.drillPath         !== drillPath         ||
-      prevState.focusedUser       !== focusedUser
+    // The set of on-screen users changed — fetch presence for the newcomers
+    // (the service only requests ids it hasn't resolved within its TTL)
+    if (
+      prevState.rootNode     !== s.rootNode     ||
+      prevState.drillReports !== s.drillReports ||
+      prevState.drillPath    !== s.drillPath    ||
+      prevState.chartLayout  !== s.chartLayout
+    ) {
+      this._schedulePresenceRefresh();
+    }
+
+    if (!s.isLoading && (
+      prevState.chartLayout       !== s.chartLayout       ||
+      prevState.showStats         !== s.showStats         ||
+      prevState.filterMembers     !== s.filterMembers     ||
+      prevState.filterGuests      !== s.filterGuests      ||
+      prevState.filterDisabled    !== s.filterDisabled    ||
+      prevState.filterDepartments !== s.filterDepartments ||
+      prevState.drillPath         !== s.drillPath         ||
+      prevState.focusedUser       !== s.focusedUser
     )) {
-      // Only persist a focus once the user actually navigated away from the
-      // default position — otherwise every page view stamps ?socFocus into
-      // the URL (and two instances on one page fight over the same param)
-      const { rootNode } = this.state;
-      const atDefault = chartLayout === 'drill'
-        ? drillPath.length === 0 ||
-          (drillPath.length === 1 && (!rootNode || drillPath[0].id === rootNode.user.id))
-        : !focusedUser;
-      const focusEmail = atDefault
-        ? null
-        : chartLayout === 'drill'
-          ? (drillPath[drillPath.length - 1].mail ?? null)
-          : (focusedUser?.mail ?? null);
-      saveChartState(this.props.instanceId, {
-        chartLayout, showStats, filterMembers, filterGuests,
-        filterDepartments: Array.from(filterDepartments),
-        focusEmail,
-      });
-      updateUrlFocus(focusEmail);
+      this._persistState();
     }
   }
 
   public componentWillUnmount(): void {
     this._mounted = false;
     if (this._presenceInterval !== null) { window.clearInterval(this._presenceInterval); this._presenceInterval = null; }
-    if (this._scrollRef.current) {
-      this._scrollRef.current.removeEventListener('touchmove', this._handleTouchMoveDirect);
-    }
+    if (this._presenceTimer !== null) { window.clearTimeout(this._presenceTimer); this._presenceTimer = null; }
+    this._clearSearchTimer();
+    this._setScrollRef(null);
     document.removeEventListener('mousedown', this._handleOutsideClick);
     document.removeEventListener('keydown', this._handleEscKey);
+    document.removeEventListener('visibilitychange', this._handleVisibilityChange);
   }
+
+  /* ── Persistence ── */
+
+  private _persistState(): void {
+    if (this._restorePending) return;
+    const { chartLayout, showStats, filterMembers, filterGuests, filterDisabled,
+            filterDepartments, drillPath, focusedUser, rootNode } = this.state;
+    // Only persist a focus once the user actually navigated away from the
+    // default position — otherwise every page view stamps ?socFocus into
+    // the URL (and two instances on one page fight over the same param)
+    const atDefault = chartLayout === 'drill'
+      ? drillPath.length === 0 ||
+        (drillPath.length === 1 && (!rootNode || drillPath[0].id === rootNode.user.id))
+      : !focusedUser;
+    const focusEmail = atDefault
+      ? null
+      : chartLayout === 'drill'
+        ? (drillPath[drillPath.length - 1].mail || null)
+        : (focusedUser?.mail || null);
+    saveChartState(this.props.instanceId, {
+      chartLayout, showStats, filterMembers, filterGuests, filterDisabled,
+      filterDepartments: Array.from(filterDepartments),
+      focusEmail,
+    });
+    this._ownUrlFocus = syncUrlFocus(focusEmail, this._ownUrlFocus);
+  }
+
+  /* ── Document listeners ── */
 
   private _handleEscKey = (e: KeyboardEvent): void => {
     if (e.key !== 'Escape') return;
@@ -934,43 +328,131 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
   private _handleOutsideClick = (e: MouseEvent): void => {
     if (this._searchRef.current && !this._searchRef.current.contains(e.target as Node)) {
-      if (this.state.showSearchResults) this.setState({ showSearchResults: false });
+      if (this.state.showSearchResults) this.setState({ showSearchResults: false, searchActiveIndex: -1 });
     }
     if (this._rootPickerRef.current && !this._rootPickerRef.current.contains(e.target as Node)) {
       if (this.state.rootPickerResults.length > 0) this.setState({ rootPickerResults: [] });
     }
   }
 
+  private _handleVisibilityChange = (): void => {
+    if (!document.hidden) this._refreshPresence();
+  }
+
+  /* ── Presence ── */
+
+  // Users actually drawn on screen: the current drill level, or the expanded,
+  // visible part of the tree (collapsed branches are skipped).
+  private _collectPresenceIds(): string[] {
+    const { chartLayout, drillPath, selectedUser, rootNode } = this.state;
+    const ids: string[] = [];
+    if (chartLayout === 'drill') {
+      if (drillPath.length > 0) ids.push(drillPath[drillPath.length - 1].id);
+      this._getVisibleDrillReports().forEach(u => ids.push(u.id));
+    } else if (rootNode) {
+      this._getRenderedNodes().forEach(r => ids.push(r.node.user.id));
+    }
+    if (selectedUser) ids.push(selectedUser.id);
+    return ids;
+  }
+
   private async _refreshPresence(): Promise<void> {
     const { graphService } = this.props;
     if (!graphService || !this._mounted) return;
-    // Only request presence for users actually on screen
-    const ids = new Set<string>();
-    const collect = (n: IOrgNode): void => { ids.add(n.user.id); n.directReports.forEach(collect); };
-    if (this.state.rootNode) collect(this.state.rootNode);
-    this.state.drillPath.forEach(u => ids.add(u.id));
-    this.state.drillReports.forEach(u => ids.add(u.id));
-    if (this.state.selectedUser) ids.add(this.state.selectedUser.id);
-    if (ids.size === 0) return;
-    const presenceMap = await graphService.getPresence(Array.from(ids));
-    if (this._mounted) this.setState({ presenceMap });
+    if (document.hidden) return; // resumes on visibilitychange
+    const ids = this._collectPresenceIds();
+    if (ids.length === 0) return;
+    try {
+      const result = await graphService.getPresence(ids);
+      if (this._mounted) this.setState({ presenceMap: new Map(result) });
+    } catch { /* presence is best-effort */ }
+  }
+
+  private _schedulePresenceRefresh(): void {
+    if (this._presenceTimer !== null) window.clearTimeout(this._presenceTimer);
+    this._presenceTimer = window.setTimeout(() => {
+      this._presenceTimer = null;
+      this._refreshPresence();
+    }, 800);
+  }
+
+  /* ── Derived data (cached by reference) ── */
+
+  private _getIsVisible(): (user: IGraphUser) => boolean {
+    const { filterMembers, filterGuests, filterDisabled, filterDepartments } = this.state;
+    return buildIsVisible({ filterMembers, filterGuests, filterDisabled, filterDepartments });
+  }
+
+  private _getVisibleIds(): Set<string> {
+    const { rootNode, filterMembers, filterGuests, filterDisabled, filterDepartments } = this.state;
+    if (!rootNode) return EMPTY_IDS;
+    const key = [rootNode, filterMembers, filterGuests, filterDisabled, filterDepartments];
+    if (!sameKey(key, this._visKey)) {
+      this._visKey = key;
+      this._visibleIds = computeVisibleIds(rootNode, this._getIsVisible());
+    }
+    return this._visibleIds;
+  }
+
+  private _getRenderedNodes(): IRenderedNode[] {
+    const { rootNode } = this.state;
+    if (!rootNode) return [];
+    const visibleIds = this._getVisibleIds();
+    if (this._renderedFor[0] !== rootNode || this._renderedFor[1] !== visibleIds) {
+      this._renderedFor = [rootNode, visibleIds];
+      this._rendered = getRenderedNodes(rootNode, visibleIds);
+      const ids = new Set<string>();
+      this._rendered.forEach(r => ids.add(r.node.user.id));
+      this._renderedIds = ids;
+    }
+    return this._rendered;
+  }
+
+  private _getVisibleDrillReports(): IGraphUser[] {
+    const isVisible = this._getIsVisible();
+    return this.state.drillReports.filter(u => isVisible(u));
+  }
+
+  private _getMatchCount(lowerQ: string): number {
+    const { rootNode } = this.state;
+    if (!rootNode || !lowerQ) return 0;
+    const visibleIds = this._getVisibleIds();
+    const key = [rootNode, visibleIds, lowerQ];
+    if (!sameKey(key, this._matchKey)) {
+      this._matchKey = key;
+      this._matchCount = countSearchMatches(rootNode, lowerQ, visibleIds);
+    }
+    return this._matchCount;
+  }
+
+  private _getSearchResults(lowerQ: string): IGraphUser[] {
+    const { allUsers } = this.state;
+    if (!lowerQ || allUsers.length === 0) return [];
+    const key = [allUsers, lowerQ];
+    if (!sameKey(key, this._resultsKey)) {
+      this._resultsKey = key;
+      this._results = allUsers.filter(u => matchUserQuery(u, lowerQ)).slice(0, MAX_SEARCH_RESULTS);
+    }
+    return this._results;
   }
 
   // Builds the tree that matches what's on screen: the current drill level in
   // drill mode, otherwise the loaded tree with filtered-out users pruned.
   private _getExportTree(): { node: IOrgNode; note?: string } | null {
-    const { rootNode, chartLayout, drillPath, drillReports } = this.state;
-    const isVisible = this._buildIsVisible();
+    const { rootNode, chartLayout, drillPath } = this.state;
+    const isVisible = this._getIsVisible();
 
     if (chartLayout === 'drill' && drillPath.length > 0) {
       const current = drillPath[drillPath.length - 1];
       return {
         node: {
           user: current,
-          directReports: drillReports.filter(isVisible).map(u => ({
+          directReports: this._getVisibleDrillReports().map(u => ({
             user: u, directReports: [], isExpanded: false, childrenLoaded: true, level: 1,
+            totalReportCount: this.props.graphService?.getTotalReportCount(u.id) ?? 0,
           })),
           isExpanded: true, childrenLoaded: true, level: 0,
+          totalReportCount: this.props.graphService?.getTotalReportCount(current.id) ?? 0,
         },
         note: 'Current drill-down level (one level of direct reports)',
       };
@@ -979,7 +461,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (!rootNode) return null;
     const filtered = filterTreeForExport(rootNode, isVisible);
     if (!filtered) return null;
-    const note = this._getUnloadedFrontier(rootNode).length > 0
+    const note = getUnloadedFrontier(rootNode).length > 0
       ? 'Includes loaded levels only — use Expand All before exporting to include deeper levels'
       : undefined;
     return { node: filtered, note };
@@ -995,79 +477,243 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (tree) exportOrgChartToCsv(tree.node);
   }
 
-  private _onSearchChange = (value: string): void => {
-    const q = value.trim().toLowerCase();
-    const hadQ = !!this.state.searchQuery.trim();
-    // Snapshot the tree when a search starts so clearing it restores the
-    // user's expand/collapse state instead of leaving everything expanded
-    if (q && !hadQ && this.state.chartLayout !== 'drill') {
-      this._preSearchRoot = this.state.rootNode;
-    }
-    const restoreRoot = (!q && hadQ) ? this._preSearchRoot : null;
-    if (!q) this._preSearchRoot = null;
+  private _exportPdfClick = (): void => { this.exportPdf(); }
 
-    this.setState(prev => {
-      const updates: Partial<IOrgChartLocalState> = {
-        searchQuery: value,
-        showSearchResults: !!q,
-        showFilters: false,
-      };
-      // Reveal matches hiding inside collapsed branches
-      if (q && prev.chartLayout !== 'drill' && prev.rootNode) {
-        updates.rootNode = expandToMatches(prev.rootNode, q).node;
-      } else if (restoreRoot) {
-        updates.rootNode = restoreRoot;
-      }
-      return updates as IOrgChartLocalState;
-    });
+  /* ── Tree edits ── */
+
+  // Applies an edit to the displayed tree and, while a search is active, to
+  // the pre-search snapshot too — so clearing the search keeps the user's
+  // expands/collapses and loaded children instead of discarding them.
+  private _mutateTree(fn: (root: IOrgNode) => IOrgNode): void {
+    if (this._preSearchRoot) this._preSearchRoot = fn(this._preSearchRoot);
+    this.setState(prev => (prev.rootNode ? { rootNode: fn(prev.rootNode) } : null));
   }
 
-  private async _loadTree(): Promise<void> {
-    const { graphService, topLevelUser, levelsBelow } = this.props;
+  /* ── Search ── */
+
+  private _clearSearchTimer(): void {
+    if (this._searchTimer !== null) { window.clearTimeout(this._searchTimer); this._searchTimer = null; }
+  }
+
+  private _onSearchChange = (_e?: React.ChangeEvent<HTMLInputElement>, value?: string): void => {
+    const v = value || '';
+    const q = v.trim().toLowerCase();
+    // The input updates immediately; the tree work is debounced
+    this.setState({ searchQuery: v, showSearchResults: !!q, showFilters: false, searchActiveIndex: -1 });
+    this._clearSearchTimer();
+    if (!q) { this._applySearch(''); return; }
+    this._searchTimer = window.setTimeout(() => {
+      this._searchTimer = null;
+      this._applySearch(q);
+    }, SEARCH_DEBOUNCE_MS);
+  }
+
+  private _applySearch(q: string): void {
+    if (!this._mounted) return;
+    const { chartLayout, rootNode } = this.state;
+    if (q && chartLayout !== 'drill' && rootNode) {
+      // Snapshot the tree when a search starts so clearing it restores the
+      // user's expand/collapse state instead of leaving everything expanded.
+      // Always expand from the snapshot so refining the query doesn't
+      // accumulate expansions from earlier keystrokes.
+      if (!this._preSearchRoot) this._preSearchRoot = rootNode;
+      this.setState({ appliedQuery: q, rootNode: expandToMatches(this._preSearchRoot, q).node });
+    } else if (!q && this._preSearchRoot) {
+      const restore = this._preSearchRoot;
+      this._preSearchRoot = null;
+      this.setState({ appliedQuery: '', rootNode: restore });
+    } else {
+      this.setState({ appliedQuery: q });
+    }
+  }
+
+  private _onSearchFocus = (): void => {
+    if (this.state.searchQuery.trim()) this.setState({ showSearchResults: true });
+  }
+
+  private _onSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>): void => {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    // Navigate the list that is on screen (driven by the debounced query)
+    const results = this._getSearchResults(this.state.appliedQuery);
+    if (results.length === 0) return;
+    e.preventDefault();
+    const cur = this.state.showSearchResults ? this.state.searchActiveIndex : -1;
+    const next = e.key === 'ArrowDown'
+      ? (cur + 1) % results.length
+      : (cur <= 0 ? results.length - 1 : cur - 1);
+    this.setState({ showSearchResults: true, searchActiveIndex: next });
+  }
+
+  private _onSearchEnter = (value?: string): void => {
+    const q = (value || '').trim().toLowerCase();
+    const { appliedQuery, searchActiveIndex, showSearchResults } = this.state;
+    const results = this._getSearchResults(q);
+    if (results.length === 0) return;
+    // The highlighted row only applies when it belongs to the list on screen
+    const idx = q === appliedQuery && showSearchResults && searchActiveIndex >= 0 && searchActiveIndex < results.length
+      ? searchActiveIndex : 0;
+    this._selectSearchResult(results[idx]);
+  }
+
+  private _onSearchEscape = (): void => {
+    if (this.state.showSearchResults) this.setState({ showSearchResults: false, searchActiveIndex: -1 });
+  }
+
+  private _selectSearchResult = (user: IGraphUser): void => {
+    this._handleFocusUser(user);
+  }
+
+  // Fluent's SearchBox hard-codes role="searchbox" on its input; the combobox
+  // pattern needs role="combobox" + aria-expanded there. React leaves the
+  // attribute alone after mount because the prop value never changes.
+  private _syncSearchAria(): void {
+    const wrap = this._searchRef.current;
+    const input = wrap ? wrap.querySelector('input') : null;
+    if (!input) return;
+    const open = this._isSearchListOpen();
+    if (input.getAttribute('role') !== 'combobox') input.setAttribute('role', 'combobox');
+    input.setAttribute('aria-haspopup', 'listbox');
+    input.setAttribute('aria-expanded', open ? 'true' : 'false');
+  }
+
+  private _isSearchListOpen(): boolean {
+    return this.state.showSearchResults && this._getSearchResults(this.state.appliedQuery).length > 0;
+  }
+
+  /* ── Loading ── */
+
+  private _getRootIdentifier(): string {
+    return this.props.topLevelUser || this.state.setupRootId;
+  }
+
+  private _handleSetupLoad = (identifier: string): void => {
+    this.setState({ setupRootId: identifier }, () => { this._loadTree(); });
+  }
+
+  // Loads the configured (or setup-form) root. `light` keeps the current UI
+  // on screen with an inline indicator instead of the full-screen spinner.
+  private async _loadTree(light = false, identifierOverride?: string): Promise<void> {
+    const { graphService } = this.props;
     if (!graphService) return;
+    const identifier = identifierOverride !== undefined ? identifierOverride : this._getRootIdentifier();
+    const seq = ++this._navSeq;
     this._preSearchRoot = null;
-    this.setState({ isLoading: true, error: null });
+    this._clearSearchTimer();
+    if (!identifier) {
+      // Nothing configured — show the setup form
+      this.setState({ isLoading: false, isRefocusing: false, error: null, rootNode: null });
+      return;
+    }
+    this.setState({
+      isLoading: !light, isRefocusing: light, error: null,
+      searchQuery: '', appliedQuery: '', showSearchResults: false,
+    });
     try {
       const [rootUser, allUsers] = await Promise.all([
-        graphService.findUser(topLevelUser),
+        graphService.findUser(identifier),
         graphService.getAllUsers().catch(() => [] as IGraphUser[]),
       ]);
+      if (!this._mounted || seq !== this._navSeq) return;
       if (!rootUser) {
-        if (this._mounted) this.setState({ isLoading: false, error: `User "${topLevelUser}" not found. Check the UPN or email in Settings.` });
+        const fromSetup = !this.props.topLevelUser;
+        this._restorePending = false;
+        this.setState({
+          isLoading: false, isRefocusing: false,
+          // Clearing the setup choice lets Retry fall back to the setup form
+          setupRootId: '',
+          error: fromSetup
+            ? `User "${identifier}" not found.`
+            : `User "${identifier}" not found. Check the UPN or email in Settings.`,
+        });
         return;
       }
-      const rawRoot = await graphService.buildOrgTree(rootUser.id, levelsBelow);
-      const rootNode = expandLoaded(rawRoot);
-      const drillPath = [rootUser];
-      const drillReports = rootNode.directReports.map(n => n.user);
-      if (this._mounted) {
-        this.setState({ rootNode, isLoading: false, allUsers, drillPath, drillReports, drillLoadingId: null }, () => {
-          this._autoFitZoom();
-        });
-        this._loadPhotosForTree(rootNode);
-        this._checkFrontierNodes(rootNode);
-        this._loadDrillReportCounts(drillReports);
-
-        // Restore last navigation position
-        if (this._pendingFocusEmail) {
-          const emailToRestore = this._pendingFocusEmail;
-          this._pendingFocusEmail = null;
-          if (emailToRestore.toLowerCase() !== (rootUser.mail || '').toLowerCase()) {
-            const foundUser = allUsers.find(u => (u.mail || '').toLowerCase() === emailToRestore.toLowerCase())
-              || await graphService.findUser(emailToRestore).catch(() => null);
-            if (foundUser && this._mounted) await this._handleFocusUser(foundUser);
-          }
-        }
-      }
+      await this._applyRootUser(rootUser, allUsers, seq);
     } catch (err) {
       const detail = err instanceof Error && err.message ? ` ${err.message}` : ' Check permissions.';
-      if (this._mounted) this.setState({ isLoading: false, error: `Failed to load org chart.${detail}` });
+      this._restorePending = false;
+      if (this._mounted && seq === this._navSeq) {
+        this.setState({ isLoading: false, isRefocusing: false, error: `Failed to load org chart.${detail}` });
+      }
+    }
+  }
+
+  // Loads the tree for a specific user (root picker / runtime root).
+  private async _loadTreeForUser(user: IGraphUser, light = false): Promise<void> {
+    const seq = ++this._navSeq;
+    this._preSearchRoot = null;
+    this._clearSearchTimer();
+    this.setState({
+      isLoading: !light, isRefocusing: light, error: null,
+      searchQuery: '', appliedQuery: '', showSearchResults: false,
+    });
+    try {
+      await this._applyRootUser(user, null, seq);
+    } catch {
+      this._restorePending = false;
+      if (this._mounted && seq === this._navSeq) {
+        this.setState({ isLoading: false, isRefocusing: false, error: 'Failed to load org chart for this person.' });
+      }
+    }
+  }
+
+  private async _applyRootUser(rootUser: IGraphUser, allUsers: IGraphUser[] | null, seq: number): Promise<void> {
+    const gs = this.props.graphService;
+    if (!gs) return;
+    const rawRoot = await gs.buildOrgTree(rootUser.id, this.props.levelsBelow);
+    if (!this._mounted || seq !== this._navSeq) return;
+
+    const rootNode = prepareTree(rawRoot);
+    const drillReports = rootNode.directReports.map(n => n.user);
+    const updates: Partial<IOrgChartLocalState> = {
+      rootNode, isLoading: false, isRefocusing: false, error: null,
+      drillPath: [rootUser], drillReports, drillLoadingId: null,
+      focusedUser: null, ancestorChain: [], treeFocusId: null,
+    };
+    if (allUsers) updates.allUsers = allUsers;
+
+    // A saved department filter that matches nobody would leave an empty chart
+    if (!this._deptFilterValidated) {
+      this._deptFilterValidated = true;
+      const { filterDepartments } = this.state;
+      if (filterDepartments.size > 0) {
+        const present = getUniqueDepts(rootNode);
+        const kept = new Set<string>();
+        filterDepartments.forEach(d => { if (present.has(d)) kept.add(d); });
+        if (kept.size !== filterDepartments.size) updates.filterDepartments = kept;
+      }
+    }
+
+    this._treeGen++;
+    this.setState(updates as IOrgChartLocalState, () => {
+      this._autoFitZoom();
+      this._refreshPresence();
+    });
+    this._loadPhotosForTree(rootNode);
+    this._checkFrontier(getUnloadedFrontier(rootNode));
+    this._loadDrillReportCounts(drillReports);
+
+    // Restore the deep-linked / last saved navigation position
+    if (this._pendingFocusEmail) {
+      const emailToRestore = this._pendingFocusEmail.toLowerCase();
+      this._pendingFocusEmail = null;
+      if (emailToRestore !== (rootUser.mail || '').toLowerCase()) {
+        const pool = allUsers || this.state.allUsers;
+        const foundUser = pool.find(u => (u.mail || '').toLowerCase() === emailToRestore)
+          || await gs.findUser(emailToRestore).catch(() => null);
+        if (foundUser && this._mounted && seq === this._navSeq) {
+          await this._handleFocusUser(foundUser, false);
+        }
+      }
+    }
+    if (this._restorePending) {
+      this._restorePending = false;
+      if (this._mounted) this._persistState();
     }
   }
 
   private _fixConnectorLines(): void {
     requestAnimationFrame(() => {
-      const container = this._scrollRef.current;
+      const container = this._scrollEl;
       if (!container || !this._mounted) return;
       const zoom = this.state.zoomLevel || 1;
       const allChildren = container.querySelectorAll(`.${styles.children}`) as NodeListOf<HTMLElement>;
@@ -1086,7 +732,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   private _autoFitZoom(): void {
     if (this.props.defaultZoom > 0) return; // fixed zoom configured — don't override
     requestAnimationFrame(() => {
-      const container = this._scrollRef.current;
+      const container = this._scrollEl;
       if (!container || !this._mounted) return;
       const treeWrapper = container.firstElementChild as HTMLElement;
       if (!treeWrapper) return;
@@ -1107,155 +753,234 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   }
 
   private _loadPhotosForTree(node: IOrgNode): void {
-    const ids: string[] = [];
-    const collect = (n: IOrgNode) => { ids.push(n.user.id); n.directReports.forEach(collect); };
-    collect(node);
-    this._loadPhotos(ids);
+    this._loadPhotos(Array.from(collectTreeIds(node)));
   }
 
+  // Photos are fetched in chunks and applied in as few state updates as
+  // possible, yielding to the browser between flushes so large trees don't
+  // lock up the page.
   private async _loadPhotos(ids: string[]): Promise<void> {
     const { graphService } = this.props;
     if (!graphService) return;
-    // Batch setState calls — one render per 10 photos instead of one per photo
+    const todo = ids.filter(id => !(id in this.state.photos) && !this._requestedPhotos.has(id));
+    if (todo.length === 0) return;
+    todo.forEach(id => this._requestedPhotos.add(id));
+
+    const CHUNK = 50;
+    const FLUSH_AT = 200;
     let batch: { [id: string]: string | null } = {};
+    let pending = 0;
     const flush = (): void => {
       const toApply = batch;
       batch = {};
+      pending = 0;
       if (this._mounted && Object.keys(toApply).length > 0) {
         this.setState(prev => ({ photos: { ...prev.photos, ...toApply } }));
       }
     };
-    for (const id of ids) {
+    for (let i = 0; i < todo.length; i += CHUNK) {
       if (!this._mounted) return;
-      if (id in this.state.photos || id in batch) continue;
-      batch[id] = await graphService.getUserPhoto(id);
-      if (Object.keys(batch).length >= 10) flush();
+      const slice = todo.slice(i, i + CHUNK);
+      const results = await Promise.all(slice.map(id => graphService.getUserPhoto(id).catch(() => null)));
+      slice.forEach((id, j) => { batch[id] = results[j]; });
+      pending += slice.length;
+      if (pending >= FLUSH_AT) { flush(); await yieldToBrowser(); }
     }
     flush();
   }
 
-  private async _checkFrontierNodes(rootNode: IOrgNode): Promise<void> {
+  // Marks frontier nodes that turn out to have no reports, so their expand
+  // button disappears. One tree update per batch.
+  private async _checkFrontier(frontier: IOrgNode[]): Promise<void> {
     const { graphService } = this.props;
-    if (!graphService) return;
-    const frontier: IOrgNode[] = [];
-    const collect = (n: IOrgNode) => { if (!n.childrenLoaded) { frontier.push(n); return; } n.directReports.forEach(collect); };
-    collect(rootNode);
+    if (!graphService || frontier.length === 0) return;
     const batchSize = 10;
     for (let i = 0; i < frontier.length; i += batchSize) {
       if (!this._mounted) return;
-      await Promise.all(frontier.slice(i, i + batchSize).map(async node => {
-        const hasReports = await graphService.hasDirectReports(node.user.id);
-        if (!hasReports && this._mounted) {
-          this._preSearchRoot = null;
-          this.setState(prev => ({ rootNode: prev.rootNode ? markNodeLoaded(prev.rootNode, node.user.id) : null }));
-        }
-      }));
+      const slice = frontier.slice(i, i + batchSize);
+      const results = await Promise.all(slice.map(n =>
+        graphService.hasDirectReports(n.user.id).catch(() => true)));
+      if (!this._mounted) return;
+      const empty = new Set<string>();
+      slice.forEach((n, j) => { if (!results[j]) empty.add(n.user.id); });
+      if (empty.size > 0) this._mutateTree(r => markNodesLoaded(r, empty));
     }
   }
 
   /* ── Toggle expand (full-tree mode) ── */
 
   private _handleToggle = async (node: IOrgNode): Promise<void> => {
-    const { rootNode, expandingNodes } = this.state;
-    if (!rootNode) return;
-    this._preSearchRoot = null;
-    if (node.isExpanded) { this.setState({ rootNode: setNodeExpanded(rootNode, node.user.id, false) }); return; }
-    if (!node.childrenLoaded && this.props.graphService) {
-      const s1 = new Set(expandingNodes); s1.add(node.user.id);
-      this.setState({ expandingNodes: s1 });
+    if (!this.state.rootNode) return;
+    const id = node.user.id;
+    if (node.isExpanded) { this._mutateTree(r => setNodeExpanded(r, id, false)); return; }
+    const graphService = this.props.graphService;
+    if (!node.childrenLoaded && graphService) {
+      if (this.state.expandingNodes.has(id)) return;
+      this.setState(prev => { const s = new Set(prev.expandingNodes); s.add(id); return { expandingNodes: s }; });
+      const clearExpanding = (): void => {
+        this.setState(prev => { const s = new Set(prev.expandingNodes); s.delete(id); return { expandingNodes: s }; });
+      };
       try {
-        const reports = await this.props.graphService.getDirectReports(node.user.id);
-        if (this._mounted && this.state.rootNode) {
-          // Drop reports already in the tree — a self-managed account or
-          // manager cycle would otherwise re-inject an ancestor forever
+        const reports = await graphService.getDirectReports(id);
+        if (!this._mounted) return;
+        if (this.state.rootNode) {
+          // Drop reports already in the tree (or repeated in the response) —
+          // a self-managed account or manager cycle would otherwise
+          // re-inject an ancestor forever
           const treeIds  = collectTreeIds(this.state.rootNode);
-          const children = reports
-            .filter(u => !treeIds.has(u.id))
-            .map(u => ({ user: u, directReports: [], isExpanded: false, childrenLoaded: false, level: node.level + 1 }));
-          const s2      = new Set(this.state.expandingNodes); s2.delete(node.user.id);
-          const newRoot = injectChildren(this.state.rootNode, node.user.id, children);
-          this.setState({ rootNode: newRoot, expandingNodes: s2 });
+          const children: IOrgNode[] = [];
+          reports.forEach(u => {
+            if (treeIds.has(u.id)) return;
+            treeIds.add(u.id);
+            children.push({
+              user: u, directReports: [], isExpanded: false, childrenLoaded: false, level: node.level + 1,
+              totalReportCount: graphService.getTotalReportCount(u.id),
+            });
+          });
+          this._mutateTree(r => injectChildren(r, id, children));
           this._loadPhotos(children.map(c => c.user.id));
-          this._checkFrontierNodes(newRoot);
+          this._checkFrontier(children);
         }
+        clearExpanding();
       } catch {
-        if (this._mounted) { const s2 = new Set(this.state.expandingNodes); s2.delete(node.user.id); this.setState({ expandingNodes: s2 }); }
+        if (this._mounted) clearExpanding();
       }
     } else {
-      this.setState({ rootNode: setNodeExpanded(rootNode, node.user.id, true) });
+      this._mutateTree(r => setNodeExpanded(r, id, true));
     }
   }
 
   private _handleCollapseAll = (): void => {
-    this._preSearchRoot = null;
-    if (this.state.rootNode) this.setState({ rootNode: collapseAll(this.state.rootNode) });
+    this._mutateTree(collapseAll);
   }
 
-  // Expand All: first expand already-loaded nodes for immediate feedback,
-  // then BFS-load every unloaded frontier level until the full tree is in memory.
-  private _handleExpandLoaded = async (): Promise<void> => {
-    if (!this.state.rootNode) return;
-    this._preSearchRoot = null;
-    let root = expandLoaded(this.state.rootNode);
-    this.setState({ rootNode: root });
+  // Expand All: expand already-loaded nodes for immediate feedback, then
+  // BFS-load every unloaded frontier level. Each level is assembled off-state
+  // and applied with a single tree update; the loop yields between batches.
+  private _handleExpandAll = async (): Promise<void> => {
+    const start = this.state.rootNode;
+    if (!start || this.state.isExpandingAll) return;
+    const gen = this._treeGen;
+    const root0 = expandLoaded(start);
+    this._mutateTree(expandLoaded);
 
     const gs = this.props.graphService;
     if (!gs) return;
 
     // treeIds guards against self-managed accounts and manager cycles;
     // the level cap is a safety valve so a guard regression can't hang the browser
-    const treeIds = collectTreeIds(root);
+    const treeIds = collectTreeIds(root0);
+    let frontier = getUnloadedFrontier(root0);
+    if (frontier.length === 0) { this._autoFitZoom(); return; }
+    this.setState({ isExpandingAll: true });
     const MAX_LEVELS = 50;
-    for (let level = 0; this._mounted && level < MAX_LEVELS; level++) {
-      const frontier = this._getUnloadedFrontier(root);
-      if (frontier.length === 0) break;
-
-      const BATCH = 8;
-      for (let i = 0; i < frontier.length; i += BATCH) {
-        if (!this._mounted) return;
-        const slice = frontier.slice(i, i + BATCH);
-        const results = await Promise.all(
-          slice.map(n => gs.getDirectReports(n.user.id)
-            .then(r  => ({ node: n, reports: r }))
-            .catch(() => ({ node: n, reports: [] as IGraphUser[] }))
-          )
-        );
-        // Inject the whole batch in one traversal — one tree clone per batch
-        // instead of one per node (O(n²) on large orgs otherwise)
-        const childrenById = new Map<string, IOrgNode[]>();
+    const BATCH = 25;
+    try {
+      for (let level = 0; frontier.length > 0 && level < MAX_LEVELS; level++) {
+        const levelChildren = new Map<string, IOrgNode[]>();
+        const next: IOrgNode[] = [];
         const newIds: string[] = [];
-        for (const { node: n, reports } of results) {
-          const fresh = reports.filter(u => !treeIds.has(u.id));
-          fresh.forEach(u => treeIds.add(u.id));
-          childrenById.set(n.user.id, fresh.map(u => ({
-            user: u, directReports: [], isExpanded: false, childrenLoaded: false, level: n.level + 1,
-          })));
-          newIds.push(...fresh.map(u => u.id));
+        for (let i = 0; i < frontier.length; i += BATCH) {
+          if (!this._mounted || gen !== this._treeGen) return;
+          const slice = frontier.slice(i, i + BATCH);
+          const results = await Promise.all(
+            slice.map(n => gs.getDirectReports(n.user.id)
+              .then(r  => ({ node: n, reports: r }))
+              .catch(() => ({ node: n, reports: [] as IGraphUser[] }))
+            )
+          );
+          for (const { node: n, reports } of results) {
+            const kids: IOrgNode[] = [];
+            reports.forEach(u => {
+              if (treeIds.has(u.id)) return;
+              treeIds.add(u.id);
+              kids.push({
+                user: u, directReports: [], isExpanded: false, childrenLoaded: false, level: n.level + 1,
+                totalReportCount: gs.getTotalReportCount(u.id),
+              });
+              newIds.push(u.id);
+            });
+            levelChildren.set(n.user.id, kids);
+            next.push(...kids);
+          }
+          await yieldToBrowser();
         }
-        root = expandLoaded(injectChildrenBatch(root, childrenById));
-        if (this._mounted) {
-          this.setState({ rootNode: root });
-          if (newIds.length) this._loadPhotos(newIds);
-        }
+        if (!this._mounted || gen !== this._treeGen) return;
+        this._mutateTree(r => expandLoaded(injectChildrenBatch(r, levelChildren)));
+        if (newIds.length) this._loadPhotos(newIds);
+        frontier = next;
       }
+    } finally {
+      if (this._mounted) this.setState({ isExpandingAll: false });
     }
     if (this._mounted) this._autoFitZoom();
   }
 
-  private _getUnloadedFrontier = (node: IOrgNode): IOrgNode[] => {
-    const result: IOrgNode[] = [];
-    const visit = (n: IOrgNode): void => {
-      if (!n.childrenLoaded) result.push(n);
-      else n.directReports.forEach(visit);
-    };
-    visit(node);
-    return result;
+  /* ── Keyboard navigation (tree layouts) ── */
+
+  private _handleTreeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const target = e.target as HTMLElement;
+    if (target.getAttribute('role') !== 'treeitem') return;
+    const id = target.getAttribute('data-soc-id');
+    if (!id) return;
+    const list = this._getRenderedNodes();
+    let idx = -1;
+    for (let i = 0; i < list.length; i++) { if (list[i].node.user.id === id) { idx = i; break; } }
+    if (idx < 0) return;
+    const cur = list[idx];
+    const hasReports = cur.node.directReports.length > 0 || !cur.node.childrenLoaded;
+    let targetId: string | null = null;
+
+    switch (e.key) {
+      case 'ArrowDown': if (idx < list.length - 1) targetId = list[idx + 1].node.user.id; break;
+      case 'ArrowUp':   if (idx > 0) targetId = list[idx - 1].node.user.id; break;
+      case 'Home':      targetId = list[0].node.user.id; break;
+      case 'End':       targetId = list[list.length - 1].node.user.id; break;
+      case 'ArrowRight':
+        if (!cur.node.isExpanded && hasReports) this._handleToggle(cur.node);
+        else if (cur.node.isExpanded && cur.visibleChildren.length > 0) targetId = cur.visibleChildren[0].user.id;
+        break;
+      case 'ArrowLeft':
+        if (cur.node.isExpanded && hasReports) this._handleToggle(cur.node);
+        else targetId = cur.parentId;
+        break;
+      default:
+        return;
+    }
+    e.preventDefault();
+    if (targetId) this._moveTreeFocus(targetId);
+  }
+
+  private _handleTreeItemFocus = (userId: string): void => {
+    if (this.state.treeFocusId !== userId) this.setState({ treeFocusId: userId });
+  }
+
+  private _moveTreeFocus(userId: string): void {
+    this.setState({ treeFocusId: userId }, () => this._focusTreeCard(userId));
+  }
+
+  private _focusTreeCard(userId: string): void {
+    const container = this._scrollEl;
+    if (!container) return;
+    const cards = container.querySelectorAll('[data-soc-id]');
+    for (let i = 0; i < cards.length; i++) {
+      if (cards[i].getAttribute('data-soc-id') === userId) { (cards[i] as HTMLElement).focus(); return; }
+    }
+  }
+
+  // After a drill/refocus the activated card may be gone — land on the header
+  private _focusDrillHeaderIfLost(force = false): void {
+    const active = document.activeElement;
+    if (!force && active && active !== document.body && document.body.contains(active)) return;
+    if (this._drillHeaderRef.current) this._drillHeaderRef.current.focus();
   }
 
   /* ── Card click → profile popup ── */
 
   private _handleCardClick = (user: IGraphUser): void => {
     if (Date.now() - this._lastPanEndTime < 150) return;
+    const active = document.activeElement;
+    this._personCardOpener = active instanceof HTMLElement && active !== document.body ? active : null;
     this.setState({
       selectedUser: user, showFilters: false, personCardManagerChain: [],
       personCardDottedManager: null, personCardDottedReports: [],
@@ -1263,16 +988,30 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     const gs = this.props.graphService;
     if (!gs) return;
     gs.getManagerChain(user.id, 8).then(chain => {
-      if (this._mounted) this.setState({ personCardManagerChain: chain });
+      if (this._mounted && this.state.selectedUser === user) this.setState({ personCardManagerChain: dedupeUsers(chain, user.id) });
     }).catch(() => { /* ignore */ });
     gs.getDottedLineReports(user.id).then(reports => {
-      if (this._mounted && reports.length > 0) this.setState({ personCardDottedReports: reports });
+      if (this._mounted && this.state.selectedUser === user && reports.length > 0) {
+        this.setState({ personCardDottedReports: dedupeUsers(reports, user.id) });
+      }
     }).catch(() => { /* ignore */ });
     if (user.dottedManagerId) {
       gs.findUser(user.dottedManagerId).then(mgr => {
-        if (this._mounted && mgr) this.setState({ personCardDottedManager: mgr });
+        if (this._mounted && this.state.selectedUser === user && mgr) this.setState({ personCardDottedManager: mgr });
       }).catch(() => { /* ignore */ });
     }
+  }
+
+  private _closePersonCard = (): void => {
+    const opener = this._personCardOpener;
+    this._personCardOpener = null;
+    this.setState({
+      selectedUser: null, personCardManagerChain: [],
+      personCardDottedManager: null, personCardDottedReports: [],
+    }, () => {
+      // Return focus to whatever opened the card, if it's still on the page
+      if (opener && document.body.contains(opener)) opener.focus();
+    });
   }
 
   /* ── Drill-down handlers ── */
@@ -1280,10 +1019,14 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   private _handleDrillInto = async (user: IGraphUser): Promise<void> => {
     const { graphService } = this.props;
     if (!graphService) return;
+    // A manager cycle could lead back to someone already in the path
+    const existing = this.state.drillPath.map(u => u.id).indexOf(user.id);
+    if (existing !== -1) { this._handleDrillNavigate(existing); return; }
+    const seq = this._navSeq;
     this.setState({ drillLoadingId: user.id });
     try {
-      const reports = await graphService.getDirectReports(user.id);
-      if (!this._mounted) return;
+      const reports = dedupeUsers(await graphService.getDirectReports(user.id), user.id);
+      if (!this._mounted || seq !== this._navSeq) return;
       if (reports.length === 0) {
         // No reports — open profile popup instead of drilling into a dead end
         this.setState({ drillLoadingId: null });
@@ -1294,12 +1037,16 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
         drillPath: [...prev.drillPath, user],
         drillReports: reports,
         drillLoadingId: null,
-      }));
+      }), () => this._focusDrillHeaderIfLost());
       this._loadPhotos([user.id, ...reports.map(u => u.id)]);
       this._loadDrillReportCounts(reports);
     } catch {
       if (this._mounted) this.setState({ drillLoadingId: null });
     }
+  }
+
+  private _handleDrillToggle = (node: IOrgNode): void => {
+    this._handleDrillInto(node.user);
   }
 
   private _handleDrillNavigate = async (index: number): Promise<void> => {
@@ -1308,15 +1055,16 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (!graphService || index >= drillPath.length) return;
     if (index === drillPath.length - 1) return; // already at this level
     const targetUser = drillPath[index];
+    const seq = this._navSeq;
     this.setState({ drillLoadingId: targetUser.id });
     try {
-      const reports = await graphService.getDirectReports(targetUser.id);
-      if (!this._mounted) return;
+      const reports = dedupeUsers(await graphService.getDirectReports(targetUser.id), targetUser.id);
+      if (!this._mounted || seq !== this._navSeq) return;
       this.setState({
         drillPath: drillPath.slice(0, index + 1),
         drillReports: reports,
         drillLoadingId: null,
-      });
+      }, () => this._focusDrillHeaderIfLost());
       this._loadPhotos(reports.map(u => u.id));
       this._loadDrillReportCounts(reports);
     } catch {
@@ -1326,12 +1074,25 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
   /* ── Focus on person (full-tree mode or drill mode) ── */
 
-  private _handleFocusUser = async (user: IGraphUser): Promise<void> => {
+  // Data is already in memory, so the current view stays up with an inline
+  // indicator. `moveFocus` lands keyboard focus on the new root afterward
+  // (skipped for the automatic deep-link restore on page load).
+  private _handleFocusUser = async (user: IGraphUser, moveFocus = true): Promise<void> => {
     const { graphService, levelsBelow, levelsAbove } = this.props;
     if (!graphService) return;
     const { chartLayout } = this.state;
+    const seq = ++this._navSeq;
+    this._clearSearchTimer();
+    if (moveFocus && this._restorePending) {
+      // A user navigation supersedes a still-pending deep-link restore
+      this._pendingFocusEmail = null;
+      this._restorePending = false;
+    }
 
-    this.setState({ isLoading: true, error: null, searchQuery: '', showSearchResults: false });
+    this.setState({
+      isRefocusing: true, error: null,
+      searchQuery: '', appliedQuery: '', showSearchResults: false, searchActiveIndex: -1,
+    });
 
     if (chartLayout === 'drill') {
       try {
@@ -1339,17 +1100,19 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
           graphService.getDirectReports(user.id),
           graphService.getManagerChain(user.id, levelsAbove),
         ]);
-        if (!this._mounted) return;
+        if (!this._mounted || seq !== this._navSeq) return;
+        const chain = dedupeUsers(managerChain, user.id);
+        const drillReports = dedupeUsers(reports, user.id);
         this.setState({
-          drillPath: [...managerChain, user],
-          drillReports: reports,
-          isLoading: false,
+          drillPath: [...chain, user],
+          drillReports,
+          isRefocusing: false,
           drillLoadingId: null,
-        });
-        this._loadPhotos([user.id, ...managerChain.map(u2 => u2.id), ...reports.map(u2 => u2.id)]);
-        this._loadDrillReportCounts(reports);
+        }, () => { if (moveFocus) this._focusDrillHeaderIfLost(true); });
+        this._loadPhotos([user.id, ...chain.map(u2 => u2.id), ...drillReports.map(u2 => u2.id)]);
+        this._loadDrillReportCounts(drillReports);
       } catch {
-        if (this._mounted) this.setState({ isLoading: false });
+        if (this._mounted && seq === this._navSeq) this.setState({ isRefocusing: false });
       }
       return;
     }
@@ -1357,43 +1120,65 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     // Full-tree mode
     this._preSearchRoot = null;
     try {
-      const [rootNode, ancestorChain] = await Promise.all([
+      const [rawRoot, ancestorChain] = await Promise.all([
         graphService.buildOrgTree(user.id, levelsBelow),
         graphService.getManagerChain(user.id, levelsAbove),
       ]);
-      if (this._mounted) {
-        const expanded = expandLoaded(rootNode);
-        this.setState({ rootNode: expanded, focusedUser: user, ancestorChain, isLoading: false }, () => {
-          if (this._scrollRef.current) {
-            this._scrollRef.current.scrollLeft = 0;
-            this._scrollRef.current.scrollTop  = 0;
-          }
-          this._autoFitZoom();
-        });
-        this._loadPhotosForTree(expanded);
-        this._checkFrontierNodes(expanded);
-      }
+      if (!this._mounted || seq !== this._navSeq) return;
+      const expanded = prepareTree(rawRoot);
+      this._preSearchRoot = null;
+      this._treeGen++;
+      this.setState({
+        rootNode: expanded, focusedUser: user,
+        ancestorChain: dedupeUsers(ancestorChain, user.id),
+        isRefocusing: false, treeFocusId: expanded.user.id,
+      }, () => {
+        if (this._scrollEl) {
+          this._scrollEl.scrollLeft = 0;
+          this._scrollEl.scrollTop  = 0;
+        }
+        this._autoFitZoom();
+        if (moveFocus) this._focusTreeCard(expanded.user.id);
+      });
+      this._loadPhotosForTree(expanded);
+      this._checkFrontier(getUnloadedFrontier(expanded));
     } catch {
-      if (this._mounted) this.setState({ isLoading: false, error: 'Failed to load org chart for this person.' });
+      if (this._mounted && seq === this._navSeq) {
+        this.setState({ isRefocusing: false, error: 'Failed to load org chart for this person.' });
+      }
     }
   }
+
+  private _handleFocusFromCard = (user: IGraphUser): void => {
+    this._handleFocusUser(user);
+  }
+
+  // Reloads the current root: the runtime root when one is picked, otherwise
+  // the configured / setup-form root.
+  private _reloadRoot(light: boolean): void {
+    const { runtimeRootUser } = this.state;
+    if (runtimeRootUser) this._loadTreeForUser(runtimeRootUser, light);
+    else this._loadTree(light);
+  }
+
+  private _handleRetry = (): void => { this._reloadRoot(false); }
 
   private _handleReturnToRoot = (): void => {
     const { chartLayout, rootNode } = this.state;
     if (chartLayout === 'drill' && rootNode) {
       const rootReports = rootNode.directReports.map(n => n.user);
+      this._navSeq++;
       this.setState({
         drillPath: [rootNode.user],
         drillReports: rootReports,
         focusedUser: null,
         ancestorChain: [],
         drillLoadingId: null,
-      });
+      }, () => this._focusDrillHeaderIfLost());
       this._loadDrillReportCounts(rootReports);
       return;
     }
-    this.setState({ focusedUser: null, ancestorChain: [], rootNode: null, error: null });
-    this._loadTree();
+    this._reloadRoot(true);
   }
 
   /* ── Background-fetch direct report counts for drill cards ── */
@@ -1401,20 +1186,21 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   private _loadDrillReportCounts(users: IGraphUser[]): void {
     const { graphService } = this.props;
     if (!graphService) return;
-    users.forEach(user => {
-      if (this._requestedReportCounts.has(user.id)) return;
-      this._requestedReportCounts.add(user.id);
-      graphService.getDirectReports(user.id).then(reports => {
-        if (!this._mounted) return;
-        this.setState(prev => {
-          const next = new Map(prev.drillReportCounts);
-          next.set(user.id, reports.length);
-          return { drillReportCounts: next };
-        });
-      }).catch(() => {
-        this._requestedReportCounts.delete(user.id);
+    const todo = users.filter(u => !this._requestedReportCounts.has(u.id));
+    if (todo.length === 0) return;
+    todo.forEach(u => this._requestedReportCounts.add(u.id));
+    // One state update for the whole level instead of one per card
+    Promise.all(todo.map(u => graphService.getDirectReports(u.id)
+      .then(r => ({ id: u.id, count: r.filter(x => x.id !== u.id).length }))
+      .catch(() => { this._requestedReportCounts.delete(u.id); return null; })
+    )).then(results => {
+      if (!this._mounted) return;
+      this.setState(prev => {
+        const next = new Map(prev.drillReportCounts);
+        results.forEach(r => { if (r) next.set(r.id, r.count); });
+        return { drillReportCounts: next };
       });
-    });
+    }).catch(() => { /* ignore */ });
   }
 
   /* ── Find Me ── */
@@ -1425,7 +1211,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     const user = await graphService.findUser(currentUserEmail).catch(() => null);
     if (user) {
       await this._handleFocusUser(user);
-    } else {
+    } else if (this._mounted) {
       this.setState({ findMeError: 'Your account was not found in this org.' });
       setTimeout(() => { if (this._mounted) this.setState({ findMeError: '' }); }, 3000);
     }
@@ -1433,7 +1219,8 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
   /* ── Root picker ── */
 
-  private _onRootPickerChange = (query: string): void => {
+  private _onRootPickerChange = (e: React.ChangeEvent<HTMLInputElement>): void => {
+    const query = e.target.value;
     const { allUsers } = this.state;
     if (!query.trim()) {
       this.setState({ rootPickerQuery: query, rootPickerResults: [] });
@@ -1441,49 +1228,29 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     }
     const q = query.toLowerCase();
     const results = allUsers.filter(u =>
-      (u.displayName || '').toLowerCase().includes(q) ||
-      (u.mail || '').toLowerCase().includes(q)
+      (u.displayName || '').toLowerCase().indexOf(q) !== -1 ||
+      (u.mail || '').toLowerCase().indexOf(q) !== -1
     ).slice(0, 8);
     this.setState({ rootPickerQuery: query, rootPickerResults: results });
   }
 
-  private _onRootPickerSelect = async (user: IGraphUser): Promise<void> => {
-    const { graphService, levelsBelow } = this.props;
-    if (!graphService) return;
-    this._preSearchRoot = null;
-    this.setState({ rootPickerQuery: '', rootPickerResults: [], runtimeRootUser: user, isLoading: true });
-    try {
-      const rawRoot = await graphService.buildOrgTree(user.id, levelsBelow);
-      const rootNode = expandLoaded(rawRoot);
-      const drillPath = [user];
-      const drillReports = rootNode.directReports.map(n => n.user);
-      if (this._mounted) {
-        this._requestedReportCounts.clear();
-        this.setState({
-          rootNode, drillPath, drillReports, drillLoadingId: null,
-          isLoading: false, focusedUser: null, ancestorChain: [], error: null,
-        }, () => { this._autoFitZoom(); });
-        this._loadPhotosForTree(rootNode);
-        this._checkFrontierNodes(rootNode);
-        this._loadDrillReportCounts(drillReports);
-      }
-    } catch {
-      if (this._mounted) this.setState({ isLoading: false, error: 'Failed to load org chart for this person.' });
-    }
+  private _onRootPickerSelect = (user: IGraphUser): void => {
+    this.setState({ rootPickerQuery: '', rootPickerResults: [], runtimeRootUser: user });
+    this._requestedReportCounts.clear();
+    this._loadTreeForUser(user);
   }
 
   private _resetRoot = (): void => {
-    this.setState({ runtimeRootUser: null, rootPickerQuery: '', rootPickerResults: [] });
-    this._loadTree();
+    this.setState({ runtimeRootUser: null, rootPickerQuery: '', rootPickerResults: [] },
+      () => { this._loadTree(); });
   }
 
   /* ── Layout picker ── */
 
   private _setLayout = (layout: ChartLayout): void => {
     const { rootNode, drillPath } = this.state;
-    const nextLayout = layout;
-    const updates: Partial<IOrgChartLocalState> = { chartLayout: nextLayout };
-    if (nextLayout === 'drill' && drillPath.length === 0 && rootNode) {
+    const updates: Partial<IOrgChartLocalState> = { chartLayout: layout };
+    if (layout === 'drill' && drillPath.length === 0 && rootNode) {
       const rootReports = rootNode.directReports.map(n => n.user);
       updates.drillPath = [rootNode.user];
       updates.drillReports = rootReports;
@@ -1492,7 +1259,80 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     this.setState(updates as IOrgChartLocalState);
   }
 
+  private _toggleLayoutPicker = (): void => {
+    this.setState(p => ({ showLayoutPicker: !p.showLayoutPicker, showFilters: false, showDeptFilter: false }));
+  }
+
+  private _toggleStats = (): void => { this.setState(p => ({ showStats: !p.showStats })); }
+
+  private _toggleDeptFilter = (): void => {
+    this.setState(p => ({ showDeptFilter: !p.showDeptFilter, showFilters: false, showLayoutPicker: false }));
+  }
+
+  private _toggleUserFilterPanel = (): void => {
+    this.setState(p => ({ showFilters: !p.showFilters, showDeptFilter: false, showLayoutPicker: false }));
+  }
+
+  private _toggleUserFilter = (key: UserFilterKey): void => {
+    this.setState(p => ({
+      filterMembers:  key === 'members'  ? !p.filterMembers  : p.filterMembers,
+      filterGuests:   key === 'guests'   ? !p.filterGuests   : p.filterGuests,
+      filterDisabled: key === 'disabled' ? !p.filterDisabled : p.filterDisabled,
+    }));
+  }
+
+  private _clearDeptFilter = (): void => { this.setState({ filterDepartments: new Set() }); }
+
+  private _toggleDept = (dept: string): void => {
+    this.setState(p => {
+      const next = new Set(p.filterDepartments);
+      if (next.has(dept)) next.delete(dept); else next.add(dept);
+      return { filterDepartments: next };
+    });
+  }
+
+  private _selectLayout = (layout: ChartLayout): void => {
+    this._setLayout(layout);
+    this.setState({ showLayoutPicker: false });
+  }
+
+  private _zoomOut = (): void => {
+    this.setState(p => ({ zoomLevel: Math.max(0.25, p.zoomLevel - 0.1) }));
+  }
+
+  private _zoomIn = (): void => {
+    this.setState(p => {
+      const next = Math.min(1.5, p.zoomLevel + 0.1);
+      return { zoomLevel: p.zoomLevel < 1 && next > 1 ? 1 : next };
+    });
+  }
+
+  private _zoomReset = (): void => {
+    this.setState({ zoomLevel: this.props.defaultZoom > 0 ? this.props.defaultZoom : 1 });
+  }
+
+  private _closePopups = (): void => {
+    this.setState({ showFilters: false, showDeptFilter: false, showLayoutPicker: false });
+  }
+
   /* ── Drag-to-pan (mouse) ── */
+
+  // Callback ref: the scroll area unmounts in drill layout and while loading,
+  // so the non-passive touchmove listener follows the element's lifetime.
+  private _setScrollRef = (el: HTMLDivElement | null): void => {
+    if (this._scrollEl === el) return;
+    if (this._scrollEl) this._scrollEl.removeEventListener('touchmove', this._handleTouchMoveDirect);
+    this._scrollEl = el;
+    if (el) el.addEventListener('touchmove', this._handleTouchMoveDirect, { passive: false });
+  }
+
+  // The grabbing cursor is toggled directly on the element — a state update
+  // would re-render the whole chart at the start and end of every drag
+  private _setPanningClass(on: boolean): void {
+    if (!this._scrollEl) return;
+    if (on) this._scrollEl.classList.add(styles.treeScrollPanning);
+    else this._scrollEl.classList.remove(styles.treeScrollPanning);
+  }
 
   private _handlePanStart = (e: React.MouseEvent<HTMLDivElement>): void => {
     if ((e.target as HTMLElement).closest('button, a, input')) return;
@@ -1500,26 +1340,26 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     this._panDistance  = 0;
     this._panStartX    = e.clientX;
     this._panStartY    = e.clientY;
-    this._scrollStartX = this._scrollRef.current?.scrollLeft ?? 0;
-    this._scrollStartY = this._scrollRef.current?.scrollTop  ?? 0;
-    this.setState({ isDragging: true });
+    this._scrollStartX = this._scrollEl?.scrollLeft ?? 0;
+    this._scrollStartY = this._scrollEl?.scrollTop  ?? 0;
+    this._setPanningClass(true);
     e.preventDefault();
   }
 
   private _handlePanMove = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (!this._isPanning || !this._scrollRef.current) return;
+    if (!this._isPanning || !this._scrollEl) return;
     const dx = e.clientX - this._panStartX;
     const dy = e.clientY - this._panStartY;
     this._panDistance = Math.sqrt(dx * dx + dy * dy);
-    this._scrollRef.current.scrollLeft = this._scrollStartX - dx;
-    this._scrollRef.current.scrollTop  = this._scrollStartY - dy;
+    this._scrollEl.scrollLeft = this._scrollStartX - dx;
+    this._scrollEl.scrollTop  = this._scrollStartY - dy;
   }
 
   private _handlePanEnd = (): void => {
     if (!this._isPanning) return;
     if (this._panDistance > 8) this._lastPanEndTime = Date.now();
     this._isPanning = false;
-    this.setState({ isDragging: false });
+    this._setPanningClass(false);
   }
 
   /* ── Drag-to-pan (touch) ── */
@@ -1531,261 +1371,44 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     this._panDistance  = 0;
     this._panStartX    = touch.clientX;
     this._panStartY    = touch.clientY;
-    this._scrollStartX = this._scrollRef.current?.scrollLeft ?? 0;
-    this._scrollStartY = this._scrollRef.current?.scrollTop  ?? 0;
-    this.setState({ isDragging: true });
+    this._scrollStartX = this._scrollEl?.scrollLeft ?? 0;
+    this._scrollStartY = this._scrollEl?.scrollTop  ?? 0;
+    this._setPanningClass(true);
   }
 
   private _handleTouchMoveDirect = (e: TouchEvent): void => {
-    if (!this._isPanning || !this._scrollRef.current) return;
+    if (!this._isPanning || !this._scrollEl) return;
     e.preventDefault();
     const touch = e.touches[0];
     const dx = touch.clientX - this._panStartX;
     const dy = touch.clientY - this._panStartY;
     this._panDistance = Math.sqrt(dx * dx + dy * dy);
-    this._scrollRef.current.scrollLeft = this._scrollStartX - dx;
-    this._scrollRef.current.scrollTop  = this._scrollStartY - dy;
+    this._scrollEl.scrollLeft = this._scrollStartX - dx;
+    this._scrollEl.scrollTop  = this._scrollStartY - dy;
   }
 
   private _handleTouchEnd = (): void => {
     if (!this._isPanning) return;
     if (this._panDistance > 8) this._lastPanEndTime = Date.now();
     this._isPanning = false;
-    this.setState({ isDragging: false });
-  }
-
-  /* ── Filter ── */
-
-  private _buildIsVisible = (): (user: IGraphUser) => boolean => {
-    const { filterMembers, filterGuests, filterDepartments } = this.state;
-    return (user: IGraphUser) => {
-      if (user.userType === 'Guest'     && !filterGuests)   return false;
-      if (user.accountEnabled !== false && user.userType !== 'Guest' && !filterMembers) return false;
-      if (filterDepartments.size > 0 && !filterDepartments.has(user.department || '')) return false;
-      return true;
-    };
-  }
-
-  /* ── Drill view renderer ── */
-
-  private _renderDrillView(): React.ReactElement {
-    const {
-      drillPath, drillReports, drillLoadingId,
-      photos, presenceMap, drillReportCounts,
-    } = this.state;
-    const { theme, showDepartment, compactCards } = this.props;
-    const isVisible = this._buildIsVisible();
-    const currentUser = drillPath.length > 0 ? drillPath[drillPath.length - 1] : null;
-    const visibleReports = drillReports.filter(u => isVisible(u));
-    const isDark = theme === 'dark';
-    const headerBg    = isDark ? '#1e2138' : '#ffffff';
-    const headerBorder = isDark ? '#3a3d5c' : '#e8ecf0';
-    const nameColor   = isDark ? '#e8ecff' : '#1a1a2e';
-    const deptColor2  = isDark ? '#9098b8' : '#5a6472';
-
-    return (
-      <div className={styles.drillView} ref={this._drillViewRef}>
-
-        {/* Breadcrumb nav — only shown when drilled deeper than root */}
-        {drillPath.length > 1 && (
-          <div className={styles.drillNav}>
-            <button
-              className={styles.drillNavHomeBtn}
-              onClick={this._handleReturnToRoot}
-              title="Back to top"
-            >
-              <Icon iconName="Home" />
-            </button>
-            <Icon iconName="ChevronRight" className={styles.drillNavChevron} />
-            {drillPath.slice(0, -1).map((person, i) => (
-              <React.Fragment key={person.id}>
-                <button
-                  className={styles.drillNavItem}
-                  onClick={() => this._handleDrillNavigate(i)}
-                  title={`Go back to ${person.displayName}`}
-                >
-                  <span
-                    className={styles.drillNavInitials}
-                    style={{ background: getSiteColor(theme) }}
-                  >
-                    {getInitials(person.displayName)}
-                  </span>
-                  <span className={styles.drillNavName}>{person.displayName.split(' ')[0]}</span>
-                </button>
-                <Icon iconName="ChevronRight" className={styles.drillNavChevron} />
-              </React.Fragment>
-            ))}
-            {currentUser && (
-              <span className={styles.drillNavCurrent}>
-                <span
-                  className={styles.drillNavInitials}
-                  style={{ background: getSiteColor(theme) }}
-                >
-                  {getInitials(currentUser.displayName)}
-                </span>
-                <span className={styles.drillNavName}>{currentUser.displayName}</span>
-              </span>
-            )}
-          </div>
-        )}
-
-        {/* Current person header */}
-        {currentUser && (
-          <div
-            className={styles.drillCurrentHeader}
-            style={{
-              background: headerBg,
-              borderBottom: `3px solid ${getSiteColor(theme)}`,
-              borderTop: `1px solid ${headerBorder}`,
-            }}
-          >
-            <div className={styles.drillCurrentAvatar} style={{ position: 'relative' }}>
-              {photos[currentUser.id]
-                ? <img
-                    src={photos[currentUser.id] as string}
-                    alt={currentUser.displayName}
-                    className={styles.drillCurrentAvatarImg}
-                    style={{ opacity: 0, transition: 'opacity 0.35s ease' }}
-                    onLoad={e => { (e.currentTarget as HTMLImageElement).style.opacity = '1'; }}
-                  />
-                : <div
-                    className={styles.drillCurrentAvatarInitials}
-                    style={{ background: getSiteColor(theme) }}
-                  >
-                    {getInitials(currentUser.displayName)}
-                  </div>
-              }
-              <PresenceDot status={presenceMap.get(currentUser.id)} />
-            </div>
-            <div className={styles.drillCurrentInfo}>
-              <div className={styles.drillCurrentName} style={{ color: nameColor }}>
-                {currentUser.displayName}
-              </div>
-              {currentUser.jobTitle && (
-                <div
-                  className={styles.drillCurrentTitle}
-                  style={{ color: getSiteColor(theme) }}
-                >
-                  {currentUser.jobTitle}
-                </div>
-              )}
-              {showDepartment && currentUser.department && (
-                <div className={styles.drillCurrentDept} style={{ color: deptColor2 }}>
-                  {currentUser.department}
-                </div>
-              )}
-            </div>
-            <button
-              className={styles.drillCurrentProfileBtn}
-              onClick={() => this._handleCardClick(currentUser)}
-              title="View profile"
-            >
-              <Icon iconName="Contact" />
-              <span>Profile</span>
-            </button>
-          </div>
-        )}
-
-        {/* Direct reports grid */}
-        <div className={styles.drillBody}>
-          {drillLoadingId && !drillReports.find(u => u.id === drillLoadingId) ? (
-            <div className={styles.drillSpinner}>
-              <Spinner size={SpinnerSize.medium} label="Loading..." />
-            </div>
-          ) : visibleReports.length > 0 ? (
-            <>
-              <div className={styles.drillSectionTitle}>
-                Direct Reports &nbsp;
-                <span className={styles.drillSectionCount}>{visibleReports.length}</span>
-              </div>
-              <div className={`${styles.drillReportsGrid} ${compactCards ? styles.compactMode : ''}`}>
-                {visibleReports.map(report => {
-                  const count = drillReportCounts.get(report.id);
-                  const countKnown = count !== undefined;
-                  const fakeNode: IOrgNode = {
-                    user: report,
-                    directReports: [],
-                    isExpanded: false,
-                    childrenLoaded: countKnown && count === 0,
-                    level: 1,
-                  };
-                  return (
-                    <OrgNodeCard
-                      key={report.id}
-                      node={fakeNode}
-                      photos={photos}
-                      presenceMap={presenceMap}
-                      showDepartment={showDepartment}
-                      showOffice={this.props.showOffice}
-                      isExpanding={drillLoadingId === report.id}
-                      searchQuery=""
-                      theme={theme}
-                      directReportCount={count ?? 0}
-                      compactCards={compactCards}
-                      onToggle={node => this._handleDrillInto(node.user)}
-                      onCardClick={this._handleDrillInto}
-                      onFocus={this._handleCardClick}
-                    />
-                  );
-                })}
-              </div>
-            </>
-          ) : (
-            <div className={styles.drillNoReports}>
-              No direct reports
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  /* ── No-config handler ── */
-
-  private _renderNoConfig(): React.ReactElement {
-    return (
-      <NoConfigForm onLoad={async (identifier) => {
-        const gs = this.props.graphService;
-        if (!gs) return;
-        this.setState({ isLoading: true, error: null });
-        try {
-          const user = await gs.findUser(identifier);
-          if (!user) {
-            if (this._mounted) this.setState({ isLoading: false, error: `User "${identifier}" not found.` });
-            return;
-          }
-          const [rawRoot, allUsers] = await Promise.all([
-            gs.buildOrgTree(user.id, this.props.levelsBelow),
-            gs.getAllUsers().catch(() => [] as IGraphUser[]),
-          ]);
-          if (this._mounted) {
-            const rootNode = expandLoaded(rawRoot);
-            const drillPath = [user];
-            const drillReports = rootNode.directReports.map(n => n.user);
-            this.setState({ rootNode, allUsers, drillPath, drillReports, isLoading: false });
-            this._loadPhotosForTree(rootNode);
-            this._loadDrillReportCounts(drillReports);
-          }
-        } catch {
-          if (this._mounted) this.setState({ isLoading: false, error: 'Failed to load org chart.' });
-        }
-      }} />
-    );
+    this._setPanningClass(false);
   }
 
   /* ── Render ── */
 
   public render(): React.ReactElement {
     const {
-      rootNode, isLoading, error, photos, expandingNodes, searchQuery,
+      rootNode, isLoading, error, photos, expandingNodes, searchQuery, appliedQuery,
+      showSearchResults, searchActiveIndex,
       presenceMap, zoomLevel, selectedUser, showFilters,
-      filterMembers, filterGuests, isDragging,
-      focusedUser, ancestorChain, allUsers, showSearchResults,
+      filterMembers, filterGuests, filterDisabled,
+      focusedUser, ancestorChain, allUsers,
       personCardManagerChain, chartLayout, findMeError,
       filterDepartments, showDeptFilter, showStats, showLayoutPicker,
       rootPickerQuery, rootPickerResults, runtimeRootUser,
+      isRefocusing, isExpandingAll, treeFocusId,
     } = this.state;
-    const { showDepartment, theme, currentUserEmail, compactCards,
+    const { showDepartment, showOffice, theme, accentColor, currentUserEmail, compactCards,
       enableFindMe, enableLayoutToggle, enableStats, enableDeptFilter, enableUserFilter } = this.props;
 
     if (isLoading) return (
@@ -1793,16 +1416,16 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     );
 
     if (error) return (
-      <div className={styles.errorState}>
+      <div className={styles.errorState} role="alert">
         <Icon iconName="Warning" className={styles.errorIcon} />
         <div className={styles.errorText}>{error}</div>
-        <DefaultButton text="Retry" onClick={() => this._loadTree()} />
+        <DefaultButton text="Retry" onClick={this._handleRetry} />
       </div>
     );
 
-    if (!rootNode) return this._renderNoConfig();
+    if (!rootNode) return <NoConfigForm onLoad={this._handleSetupLoad} />;
 
-    const isVisible    = this._buildIsVisible();
+    const t = getThemeTokens(theme, accentColor);
     // Full-tree scans are cached by reference — renders fire on every pan/zoom
     // state change, and the tree only changes when rootNode is replaced
     if (this._treeScanFor !== rootNode) {
@@ -1812,9 +1435,6 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     }
     const treeCounts   = this._treeCounts;
     const uniqueDepts  = this._uniqueDepts;
-    const lowerQ       = searchQuery.trim().toLowerCase();
-    const matchCount   = lowerQ ? countSearchMatches(rootNode, lowerQ, isVisible) : 0;
-    const activeFilters = (!filterMembers ? 1 : 0) + (!filterGuests ? 1 : 0);
     if (showStats && this._statsFor !== allUsers) {
       this._statsFor = allUsers;
       this._stats    = computeStats(allUsers);
@@ -1822,10 +1442,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     const stats        = showStats ? this._stats : null;
     const isDrillMode  = chartLayout === 'drill';
     const resetZoom    = this.props.defaultZoom > 0 ? this.props.defaultZoom : 1;
-
-    const searchResults = lowerQ && allUsers.length > 0
-      ? allUsers.filter(u => matchUserQuery(u, lowerQ)).slice(0, 8)
-      : [];
+    const isBusy       = isRefocusing || isExpandingAll;
 
     const containerClasses = [
       styles.container,
@@ -1834,276 +1451,89 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
     const treeScrollClasses = [
       styles.treeScroll,
-      isDragging ? styles.treeScrollPanning : '',
       chartLayout === 'horizontal' ? styles.layoutHorizontal : '',
       compactCards ? styles.compactMode : '',
+      isRefocusing ? styles.refocusing : '',
     ].filter(Boolean).join(' ');
 
+    let visibleIds = EMPTY_IDS;
+    let tabStopId = rootNode.user.id;
+    if (!isDrillMode) {
+      visibleIds = this._getVisibleIds();
+      this._getRenderedNodes();
+      if (treeFocusId && this._renderedIds.has(treeFocusId)) tabStopId = treeFocusId;
+    }
+
     return (
-      <div className={containerClasses}>
+      <div className={containerClasses} style={getThemeContainerStyle(theme, accentColor)}>
 
         {/* ── Toolbar ── */}
-        <div className={styles.chartToolbar}>
-
-          {/* Search with results dropdown */}
-          <div className={styles.searchWrapper} ref={this._searchRef}>
-            <SearchBox
-              placeholder="Search people..."
-              value={searchQuery}
-              onChange={(_, v) => this._onSearchChange(v || '')}
-              onFocus={() => { if (searchQuery.trim()) this.setState({ showSearchResults: true }); }}
-              className={styles.chartSearch}
-              underlined
-            />
-            {lowerQ && !showSearchResults && !isDrillMode && (
-              <span className={styles.chartSearchHit}>{matchCount} {matchCount === 1 ? 'match' : 'matches'} in tree</span>
-            )}
-            {showSearchResults && searchResults.length > 0 && (
-              <div className={styles.searchResults}>
-                {searchResults.map(u => {
-                  const color = getSiteColor(theme);
-                  return (
-                    <button
-                      key={u.id}
-                      className={styles.searchResult}
-                      onClick={() => { this._handleFocusUser(u); this.setState({ searchQuery: '' }); }}
-                    >
-                      <span className={styles.searchResultInitials} style={{ background: color }}>
-                        {getInitials(u.displayName)}
-                      </span>
-                      <span className={styles.searchResultInfo}>
-                        <span className={styles.searchResultName}>{u.displayName}</span>
-                        <span className={styles.searchResultMeta}>{[u.jobTitle, u.department].filter(Boolean).join(' · ')}</span>
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Expand/Collapse — only in full-tree mode */}
-          {!isDrillMode && (
-            <div className={styles.chartActions}>
-              <button className={styles.chartActionBtn} onClick={this._handleExpandLoaded}>
-                <Icon iconName="ExploreContent" /> Expand All
-              </button>
-              <button className={styles.chartActionBtn} onClick={this._handleCollapseAll}>
-                <Icon iconName="CollapseContent" /> Collapse All
-              </button>
-            </div>
-          )}
-
-          {/* Find Me */}
-          {currentUserEmail && enableFindMe && (
-            <button
-              className={styles.iconToolBtn}
-              onClick={this._handleFindMe}
-              title="Find me in the org chart"
-            >
-              <Icon iconName="Contact" />
-            </button>
-          )}
-
-          {/* Layout picker */}
-          {enableLayoutToggle && (
-            <div className={styles.toolbarPopupAnchor}>
-              <button
-                className={`${styles.chartActionBtn} ${showLayoutPicker ? styles.iconToolBtnActive : ''}`}
-                onClick={() => this.setState(p => ({ showLayoutPicker: !p.showLayoutPicker, showFilters: false, showDeptFilter: false }))}
-                title="Switch view layout"
-              >
-                <Icon iconName="ViewAll" />
-                <span>View</span>
-              </button>
-              {showLayoutPicker && (
-                <div className={styles.filterPanel} style={{ minWidth: 210 }}>
-                  <div className={styles.filterPanelTitle}>View layout</div>
-                  {LAYOUT_CYCLE.map(layout => (
-                    <button
-                      key={layout}
-                      className={styles.filterItem}
-                      style={{
-                        border: 'none',
-                        background: chartLayout === layout ? '#e8f4fd' : 'transparent',
-                        cursor: 'pointer',
-                        width: '100%',
-                        textAlign: 'left',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        padding: '8px 10px',
-                        borderRadius: 4,
-                        fontWeight: chartLayout === layout ? 600 : 400,
-                        color: chartLayout === layout ? '#0078d4' : 'inherit',
-                      }}
-                      onClick={() => { this._setLayout(layout); this.setState({ showLayoutPicker: false }); }}
-                    >
-                      <Icon iconName={LAYOUT_ICON[layout]} />
-                      <span style={{ flex: 1 }}>{LAYOUT_TITLE[layout]}</span>
-                      {chartLayout === layout && <Icon iconName="CheckMark" />}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Stats toggle */}
-          {enableStats && (
-            <button
-              className={`${styles.iconToolBtn} ${showStats ? styles.iconToolBtnActive : ''}`}
-              onClick={() => this.setState(p => ({ showStats: !p.showStats }))}
-              title="Org stats summary"
-            >
-              <Icon iconName="BarChartVertical" />
-            </button>
-          )}
-
-          {/* Dept filter button */}
-          {enableDeptFilter && <div className={styles.toolbarPopupAnchor}>
-            <button
-              className={`${styles.iconToolBtn} ${filterDepartments.size > 0 ? styles.iconToolBtnActive : ''}`}
-              onClick={() => this.setState(p => ({ showDeptFilter: !p.showDeptFilter, showFilters: false }))}
-              title="Filter by department"
-            >
-              <Icon iconName="DeveloperTools" />
-              {filterDepartments.size > 0 && <span className={styles.toolBtnBadge}>{filterDepartments.size}</span>}
-            </button>
-            {showDeptFilter && (
-              <div className={styles.filterPanel} style={{ minWidth: 220 }}>
-                <div className={styles.filterPanelTitle}>Filter by department</div>
-                {Array.from(uniqueDepts.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dept, count]) => (
-                  <label key={dept} className={styles.filterItem}>
-                    <input
-                      type="checkbox"
-                      className={styles.filterCheckbox}
-                      checked={filterDepartments.has(dept)}
-                      onChange={() => {
-                        const next = new Set(filterDepartments);
-                        next.has(dept) ? next.delete(dept) : next.add(dept);
-                        this.setState({ filterDepartments: next });
-                      }}
-                    />
-                    <span className={styles.filterLabel}>{dept}</span>
-                    <span className={styles.filterCount}>{count}</span>
-                  </label>
-                ))}
-                {filterDepartments.size > 0 && (
-                  <button
-                    className={styles.filterItem}
-                    style={{ border: 'none', background: 'none', cursor: 'pointer', color: '#0078d4', fontWeight: 600, fontSize: 12 }}
-                    onClick={() => this.setState({ filterDepartments: new Set() })}
-                  >
-                    Clear all filters
-                  </button>
-                )}
-              </div>
-            )}
-          </div>}
-
-          {/* Filter button */}
-          {enableUserFilter && (
-            <div className={styles.toolbarPopupAnchor}>
-              <button
-                className={`${styles.iconToolBtn} ${activeFilters > 0 ? styles.iconToolBtnActive : ''}`}
-                onClick={() => this.setState(p => ({ showFilters: !p.showFilters }))}
-                title="Filter user types"
-              >
-                <Icon iconName="Filter" />
-                {activeFilters > 0 && <span className={styles.toolBtnBadge}>{activeFilters}</span>}
-              </button>
-              {showFilters && (
-                <FilterPanel
-                  filterMembers={filterMembers}
-                  filterGuests={filterGuests}
-                  counts={treeCounts}
-                  onToggle={key => this.setState(p => ({
-                    filterMembers: key === 'members' ? !p.filterMembers : p.filterMembers,
-                    filterGuests:  key === 'guests'  ? !p.filterGuests  : p.filterGuests,
-                  }))}
-                />
-              )}
-            </div>
-          )}
-
-          {/* Export PDF / CSV */}
-          <button className={styles.iconToolBtn} onClick={() => this.exportPdf()} title="Download as PDF">
-            <Icon iconName="PDF" />
-          </button>
-          <button className={styles.iconToolBtn} onClick={this._exportCsv} title="Download as CSV spreadsheet">
-            <Icon iconName="ExcelDocument" />
-          </button>
-
-          {/* Root picker — "View from person…" */}
-          <div className={styles.rootPickerWrapper} ref={this._rootPickerRef}>
-            {runtimeRootUser ? (
-              <div className={styles.rootPickerActive}>
-                <Icon iconName="Org" className={styles.rootPickerIcon} />
-                <span className={styles.rootPickerActiveName}>{runtimeRootUser.displayName}</span>
-                <button
-                  className={styles.rootPickerReset}
-                  onClick={this._resetRoot}
-                  title="Reset to default root"
-                >
-                  <Icon iconName="Cancel" />
-                </button>
-              </div>
-            ) : (
-              <>
-                <div className={styles.rootPickerInputWrap}>
-                  <Icon iconName="Org" className={styles.rootPickerIcon} />
-                  <input
-                    type="text"
-                    className={styles.rootPickerInput}
-                    placeholder="View from person…"
-                    value={rootPickerQuery}
-                    onChange={e => this._onRootPickerChange(e.target.value)}
-                  />
-                </div>
-                {rootPickerResults.length > 0 && (
-                  <div className={styles.rootPickerDropdown}>
-                    {rootPickerResults.map(u => (
-                      <button
-                        key={u.id}
-                        className={styles.rootPickerOption}
-                        onClick={() => this._onRootPickerSelect(u)}
-                      >
-                        <span className={styles.rootPickerOptionInitials} style={{ background: getSiteColor(theme) }}>
-                          {getInitials(u.displayName)}
-                        </span>
-                        <span className={styles.rootPickerOptionInfo}>
-                          <span className={styles.rootPickerOptionName}>{u.displayName}</span>
-                          {u.jobTitle && <span className={styles.rootPickerOptionMeta}>{u.jobTitle}</span>}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          {/* Zoom — only in full-tree mode */}
-          {!isDrillMode && (
-            <div className={styles.zoomControls}>
-              <button className={styles.zoomBtn} onClick={() => this.setState({ zoomLevel: Math.max(0.25, zoomLevel - 0.1) })} title="Zoom out" disabled={zoomLevel <= 0.25}>
-                <Icon iconName="Remove" />
-              </button>
-              <span className={styles.zoomLabel}>{Math.round(zoomLevel * 100)}%</span>
-              <button className={styles.zoomBtn} onClick={() => { const next = Math.min(1.5, zoomLevel + 0.1); this.setState({ zoomLevel: zoomLevel < 1 && next > 1 ? 1 : next }); }} title="Zoom in" disabled={zoomLevel >= 1.5}>
-                <Icon iconName="Add" />
-              </button>
-              <button className={styles.zoomBtn} onClick={() => this.setState({ zoomLevel: resetZoom })} title="Reset zoom" disabled={zoomLevel === resetZoom}>
-                <Icon iconName="Refresh" />
-              </button>
-            </div>
-          )}
-        </div>
+        <OrgChartToolbar
+          theme={theme}
+          accentColor={accentColor}
+          isDrillMode={isDrillMode}
+          searchRef={this._searchRef}
+          idPrefix={this._uid}
+          searchQuery={searchQuery}
+          appliedQuery={appliedQuery}
+          matchCount={appliedQuery && !isDrillMode ? this._getMatchCount(appliedQuery) : 0}
+          searchResults={this._getSearchResults(appliedQuery)}
+          showSearchResults={showSearchResults}
+          searchActiveIndex={searchActiveIndex}
+          onSearchChange={this._onSearchChange}
+          onSearchFocus={this._onSearchFocus}
+          onSearchKeyDown={this._onSearchKeyDown}
+          onSearchEnter={this._onSearchEnter}
+          onSearchEscape={this._onSearchEscape}
+          onSelectSearchResult={this._selectSearchResult}
+          isExpandingAll={isExpandingAll}
+          isRefocusing={isRefocusing}
+          onExpandAll={this._handleExpandAll}
+          onCollapseAll={this._handleCollapseAll}
+          showFindMe={!!currentUserEmail && enableFindMe}
+          onFindMe={this._handleFindMe}
+          enableLayoutToggle={enableLayoutToggle}
+          chartLayout={chartLayout}
+          showLayoutPicker={showLayoutPicker}
+          onToggleLayoutPicker={this._toggleLayoutPicker}
+          onSelectLayout={this._selectLayout}
+          enableStats={enableStats}
+          showStats={showStats}
+          onToggleStats={this._toggleStats}
+          enableDeptFilter={enableDeptFilter}
+          uniqueDepts={uniqueDepts}
+          filterDepartments={filterDepartments}
+          showDeptFilter={showDeptFilter}
+          onToggleDeptFilter={this._toggleDeptFilter}
+          onToggleDept={this._toggleDept}
+          onClearDeptFilter={this._clearDeptFilter}
+          enableUserFilter={enableUserFilter}
+          filterMembers={filterMembers}
+          filterGuests={filterGuests}
+          filterDisabled={filterDisabled}
+          treeCounts={treeCounts}
+          showFilters={showFilters}
+          onToggleUserFilterPanel={this._toggleUserFilterPanel}
+          onToggleUserFilter={this._toggleUserFilter}
+          onExportPdf={this._exportPdfClick}
+          onExportCsv={this._exportCsv}
+          rootPickerRef={this._rootPickerRef}
+          runtimeRootUser={runtimeRootUser}
+          rootPickerQuery={rootPickerQuery}
+          rootPickerResults={rootPickerResults}
+          onRootPickerChange={this._onRootPickerChange}
+          onRootPickerSelect={this._onRootPickerSelect}
+          onResetRoot={this._resetRoot}
+          zoomLevel={zoomLevel}
+          resetZoom={resetZoom}
+          onZoomOut={this._zoomOut}
+          onZoomIn={this._zoomIn}
+          onZoomReset={this._zoomReset}
+        />
 
         {/* ── Find Me error toast ── */}
         {findMeError && (
-          <div className={styles.findMeToast}>{findMeError}</div>
+          <div className={styles.findMeToast} role="alert">{findMeError}</div>
         )}
 
         {/* ── Stats bar ── */}
@@ -2118,7 +1548,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
         {/* ── Ancestor strip (full-tree mode only) ── */}
         {!isDrillMode && focusedUser && (
-          <div className={styles.ancestorStrip}>
+          <nav className={styles.ancestorStrip} aria-label="Reporting line">
             <button className={styles.ancestorReturnBtn} onClick={this._handleReturnToRoot} title="Back to full org chart">
               <Icon iconName="Home" /> Full org
             </button>
@@ -2130,7 +1560,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
                   onClick={() => this._handleFocusUser(ancestor)}
                   title={`Focus on ${ancestor.displayName}`}
                 >
-                  <span className={styles.ancestorInitials} style={{ background: getSiteColor(theme) }}>
+                  <span className={styles.ancestorInitials} style={{ background: t.accent, color: t.onAccent }}>
                     {getInitials(ancestor.displayName)}
                   </span>
                   <span className={styles.ancestorName}>{ancestor.displayName.split(' ')[0]}</span>
@@ -2138,22 +1568,45 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
                 <Icon iconName="ChevronRight" className={styles.ancestorChevron} />
               </React.Fragment>
             ))}
-            <span className={styles.ancestorCurrent}>
-              <span className={styles.ancestorInitials} style={{ background: getSiteColor(theme) }}>
+            <span className={styles.ancestorCurrent} aria-current="page">
+              <span className={styles.ancestorInitials} style={{ background: t.accent, color: t.onAccent }}>
                 {getInitials(focusedUser.displayName)}
               </span>
               <span className={styles.ancestorName}>{focusedUser.displayName}</span>
             </span>
-          </div>
+          </nav>
         )}
 
         {/* ── DRILL-DOWN VIEW ── */}
-        {isDrillMode && this._renderDrillView()}
+        {isDrillMode && (
+          <DrillView
+            drillPath={this.state.drillPath}
+            visibleReports={this._getVisibleDrillReports()}
+            allReports={this.state.drillReports}
+            drillLoadingId={this.state.drillLoadingId}
+            photos={photos}
+            presenceMap={presenceMap}
+            drillReportCounts={this.state.drillReportCounts}
+            graphService={this.props.graphService}
+            theme={theme}
+            accentColor={accentColor}
+            showDepartment={showDepartment}
+            showOffice={showOffice}
+            compactCards={compactCards}
+            isBusy={isRefocusing}
+            headerRef={this._drillHeaderRef}
+            onReturnToRoot={this._handleReturnToRoot}
+            onNavigate={this._handleDrillNavigate}
+            onDrillInto={this._handleDrillInto}
+            onDrillToggle={this._handleDrillToggle}
+            onShowProfile={this._handleCardClick}
+          />
+        )}
 
         {/* ── FULL TREE VIEW ── */}
         {!isDrillMode && (
           <div
-            ref={this._scrollRef}
+            ref={this._setScrollRef}
             className={treeScrollClasses}
             style={{ position: 'relative' }}
             onMouseDown={this._handlePanStart}
@@ -2162,22 +1615,34 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
             onMouseLeave={this._handlePanEnd}
             onTouchStart={this._handleTouchStart}
             onTouchEnd={this._handleTouchEnd}
+            aria-busy={isBusy}
           >
-            <div style={{ zoom: zoomLevel, display: 'inline-block', minWidth: '100%' }}>
+            <div
+              style={{ zoom: zoomLevel, display: 'inline-block', minWidth: '100%' }}
+              role="tree"
+              aria-label="Org chart"
+              onKeyDown={this._handleTreeKeyDown}
+            >
               <OrgTree
                 node={rootNode}
                 photos={photos}
                 presenceMap={presenceMap}
                 showDepartment={showDepartment}
-                showOffice={this.props.showOffice}
+                showOffice={showOffice}
                 expandingNodes={expandingNodes}
-                searchQuery={lowerQ}
+                searchQuery={appliedQuery}
                 theme={theme}
-                isVisible={isVisible}
+                accentColor={accentColor}
+                visibleIds={visibleIds}
                 compactCards={compactCards}
+                depth={1}
+                posInSet={1}
+                setSize={1}
+                tabStopId={tabStopId}
                 onToggle={this._handleToggle}
                 onCardClick={this._handleCardClick}
-                onFocus={this._handleFocusUser}
+                onFocus={this._handleFocusFromCard}
+                onItemFocus={this._handleTreeItemFocus}
               />
             </div>
           </div>
@@ -2185,10 +1650,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
         {/* ── Popups backdrop ── */}
         {(showFilters || showDeptFilter || showLayoutPicker) && (
-          <div
-            className={styles.popupBackdrop}
-            onClick={() => this.setState({ showFilters: false, showDeptFilter: false, showLayoutPicker: false })}
-          />
+          <div className={styles.popupBackdrop} onClick={this._closePopups} />
         )}
 
         {/* ── Person card ── */}
@@ -2198,17 +1660,24 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
             photo={photos[selectedUser.id] ?? null}
             presence={presenceMap.get(selectedUser.id)}
             theme={theme}
+            accentColor={accentColor}
             managerChain={personCardManagerChain}
             dottedManager={this.state.personCardDottedManager}
             dottedReports={this.state.personCardDottedReports}
-            onClose={() => this.setState({
-              selectedUser: null, personCardManagerChain: [],
-              personCardDottedManager: null, personCardDottedReports: [],
-            })}
-            onFocus={this._handleFocusUser}
+            directReportCount={this.props.graphService?.getDirectReportCount(selectedUser.id) ?? 0}
+            totalReportCount={this.props.graphService?.getTotalReportCount(selectedUser.id) ?? 0}
+            customAttributes={this.props.customAttributes}
+            onClose={this._closePersonCard}
+            onFocus={this._handleFocusFromCard}
           />
         )}
       </div>
     );
   }
+}
+
+function sameKey(a: unknown[], b: unknown[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) return false;
+  return true;
 }

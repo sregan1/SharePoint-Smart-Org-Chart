@@ -4,6 +4,36 @@ All notable changes to Smart Org Chart are documented here.
 
 ---
 
+## [1.3.1] — 2026-09-23
+
+### Added
+- **Custom chart theme** — a fifth **Chart Theme** option, **Custom**, lets an admin pick any accent color for the Directory and Org Chart instead of choosing from the four built-in palettes. The property pane shows a color swatch, a hex input, and R/G/B number inputs, plus a live contrast check that warns when text would be hard to read on the chosen color; text drawn on or from the accent color automatically switches to a readable shade.
+- **Custom Attributes** — a new **Custom Attributes** group in the property pane lets an admin surface up to 10 additional Entra ID fields (e.g. `employeeId`, `companyName`, `city`, or `extensionAttribute1`–`15` for on-premises AD attributes like cost center or building) in the Employee Directory and/or the Org Chart's profile card, each with its own display label. Requires the Graph API data source — SharePoint Search has no generic way to read these fields.
+- **Total headcount** — in addition to the existing direct-report count, cards in the Org Chart, the profile popup, and Employee Directory rows now also show the total number of people below that person at every level (e.g. "8 direct reports · 33 total"), computed instantly with no extra loading.
+- **Refresh data button** — a new header-bar button manually reloads data from Microsoft Graph or SharePoint Search, bypassing the local cache (see below). Its tooltip shows when the data was last loaded.
+- **Local data caching** — downloaded user and org data is now cached locally for up to 4 hours (in addition to the existing in-memory cache), so reopening or reloading the page no longer re-downloads the whole directory every time. Admin filter changes (excluded accounts, hidden guests/disabled accounts, etc.) now re-apply to the cached data instantly instead of triggering a fresh download.
+- **Keyboard navigation in the org chart tree** — Arrow Up/Down/Left/Right and Home/End now move between cards in the Top Down and Left to Right layouts, with a visible focus ring; the search results dropdown supports Arrow Up/Down and Enter.
+
+### Changed
+- **Employee Directory cards resize to fit their content** — a card with several optional fields enabled (custom attributes, the new headcount line, etc.) now grows to show everything instead of being clipped at a fixed height.
+- **Admin filter changes no longer re-download the whole directory** — changing a User Filter now re-applies it to already-loaded data in memory; only changing the data source, demo mode, the dotted-line attribute, or which custom attributes are configured triggers a fresh download (needed because those change what's actually requested from Graph).
+- **Default Font Size now applies live** — changing the admin's default text scale now updates immediately for any user who hasn't chosen their own font size in Preferences.
+- Large internal refactor of the Org Chart component for maintainability (split into focused modules) and performance (memoized rendering, debounced search, batched tree updates) — no user-facing behavior change beyond the fixes below.
+
+### Fixed
+- **Keyboard users couldn't expand org chart cards** — pressing Enter or Space on a card's Expand or Focus button opened the profile popup instead of activating that button.
+- **Large organizations loaded and rendered slowly** — Expand All and photo loading no longer lock up the page while working through a large tree; the SharePoint Search fallback path now batches its per-manager lookups instead of issuing one request per manager; a throttled Microsoft Graph request is now retried with backoff instead of silently falling back to a partial dataset.
+- **Two people configured as each other's manager could duplicate nodes** — this cycle is now detected and broken automatically instead of producing repeated cards or infinite loops.
+- **PDF/CSV export and match counts could disagree with what was on screen** when a department filter was active.
+- **Saved preferences could crash the org chart** if browser storage held an unexpected value (e.g. after a browser profile sync); saved settings are now validated before use.
+- **Broken profile photos left a blank tile** instead of falling back to initials.
+- A trailing space in the directory search box prevented an otherwise-matching result from appearing.
+- Presence lookups that failed due to a missing permission were retried every 60 seconds instead of backing off.
+- The property pane's color picker and "max employees per page" slider could lose focus or stop responding while being dragged, because every change was rebuilding the field's inputs from scratch.
+- Various accessibility fixes: the org chart tree now exposes proper `tree`/`treeitem` roles, the profile popup traps focus and returns it to the card that opened it, and several controls that were invisible or unreachable by keyboard now have visible focus states.
+
+---
+
 ## [1.3.0] — 2026-07-14
 
 ### Added

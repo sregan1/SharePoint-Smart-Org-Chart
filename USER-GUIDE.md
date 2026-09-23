@@ -1,5 +1,5 @@
 # Smart Org Chart — User Guide
-**Version 1.3.0**
+**Version 1.3.1**
 
 Smart Org Chart is a SharePoint web part that gives your organization two complementary views of its people data: a searchable **Employee Directory** and an interactive **Org Chart**, both powered by Microsoft Graph.
 
@@ -18,6 +18,7 @@ Smart Org Chart is a SharePoint web part that gives your organization two comple
 6. [User Preferences](#6-user-preferences)
 7. [Exporting](#7-exporting)
 8. [Admin Configuration](#8-admin-configuration)
+   - [Custom Attributes](#custom-attributes)
 9. [Themes](#9-themes)
 10. [Tips](#10-tips)
 
@@ -41,6 +42,7 @@ The header bar is always visible at the top of the web part.
 |---|---|
 | **Logo** | Company logo configured by the admin (optional) |
 | **App / View title** | Company name (if set) and the name of the current view |
+| **Refresh data** | Reloads data from Microsoft Graph (or SharePoint Search), bypassing the local cache. Hover or focus the button to see when data was last loaded. Data is normally cached for up to 4 hours, so use this if you know something changed (a new hire, a manager update) and don't want to wait. |
 | **View toggle** | Switches between Employee Directory and Org Chart |
 | **Settings gear** | Opens the [User Preferences](#6-user-preferences) panel |
 
@@ -66,13 +68,15 @@ Type in the search box above the alphabet bar to filter by name, job title, depa
 
 Each card shows the employee's profile photo (or their initials if no photo is available), name, job title, and any additional fields you have enabled in [User Preferences](#6-user-preferences): email address, phone number, department, and office location.
 
+If your admin has configured any [Custom Attributes](#custom-attributes), those appear as extra fields on the card too (e.g. Employee ID, City, Cost Center). If the person manages anyone, the card also shows how many people report to them, and the total headcount below them if that's larger than their direct-report count (e.g. "Manages 8 (33 total)").
+
 ![Close-up of an employee card with photo, name, title, email and department](screenshots/05-directory-card.png)
 
 Click any card to open the [Person Profile Card](#5-person-profile-card).
 
 ### List view
 
-Toggle between the card grid and a compact list view using the view buttons above the alphabet bar.
+Toggle between the card grid and a compact list view using the view buttons above the alphabet bar. Any configured Custom Attributes appear as extra columns, and a "Reports" column shows headcount for anyone who manages people.
 
 ![Employee Directory in list view showing a compact single-row layout per person](screenshots/17-directory-list.png)
 
@@ -110,7 +114,7 @@ The default layout. Shows one level of the hierarchy at a time, starting from th
 
 ![Drill-down breadcrumb showing CEO → VP Engineering → Director Backend](screenshots/07-orgchart-drill-breadcrumb.png)
 
-Each card shows the number of direct reports. Cards with no reports open the [Person Profile Card](#5-person-profile-card) when clicked.
+Each card shows the number of direct reports, plus the total headcount below that person (across every level) when it's larger than the direct-report count. Cards with no reports open the [Person Profile Card](#5-person-profile-card) when clicked.
 
 ### Tree Layouts (Vertical & Horizontal)
 
@@ -129,6 +133,8 @@ The vertical and horizontal tree layouts display the full loaded hierarchy simul
 
 **Zooming:** Use the **+** / **−** buttons in the toolbar (bottom-right) or the reset button to return to the default zoom level (100%, or whatever fixed zoom your admin has configured).
 
+**Keyboard navigation:** Click a card to give it keyboard focus, then use **Arrow Up/Down/Left/Right** to move between cards and **Home**/**End** to jump to the first or last card at that level. Each card also shows the total headcount below that person, in addition to their direct-report count.
+
 ### Org Chart Toolbar
 
 The toolbar appears above the chart and contains the following controls (some may be hidden by the admin):
@@ -137,7 +143,7 @@ The toolbar appears above the chart and contains the following controls (some ma
 
 | Control | Description |
 |---|---|
-| **Search box** | Search all people in the org. A live dropdown shows up to 8 matching people; click a result to focus the chart on that person. In tree mode, matching cards are highlighted in the chart. |
+| **Search box** | Search all people in the org. A live dropdown shows up to 8 matching people; click a result, or use **Arrow Up/Down** and **Enter**, to focus the chart on that person. In tree mode, matching cards are highlighted in the chart. |
 | **Expand All / Collapse All** | Available in tree modes only. Expand All loads and shows the entire organization. |
 | **Find Me** | Centers the org chart on your own profile. |
 | **View from person…** | Type a name to temporarily re-root the chart at any person. The chart reloads from that person downward. Click the × to return to the default root. |
@@ -169,9 +175,12 @@ The profile card shows:
 
 - **Profile photo** and **presence status** (Available, Busy, Away, etc.) pulled from Microsoft Teams
 - **Name, job title, and department**
+- **Direct and total reports** — e.g. "8 direct reports · 33 total" — shown when the person manages anyone
 - **Email, phone numbers, and office location**
+- **Custom Attributes** — any Entra ID fields your admin has configured to show here (see [Custom Attributes](#custom-attributes)), such as Employee ID or Cost Center
 - **Disabled / Guest badges** where applicable
 - **Reports to** — the person's manager chain up to 8 levels, shown as clickable chips. Click any chip to jump to that manager.
+- **Dotted line** — if your admin has configured a dotted-line manager attribute, this person's secondary/dotted-line manager and any dotted-line reports appear here as clickable chips (↑ for their dotted-line manager, ↓ for dotted-line reports)
 - **Action buttons:** Chat in Teams, Email, and Focus (re-centers the org chart on this person)
 
 Press **Escape** or click the overlay to close the card.
@@ -210,7 +219,7 @@ These toggles control what appears on employee cards in **both** the Employee Di
 | **Manager levels shown** | 1 | When you focus the chart on a specific person, how many levels above them to show in the ancestor breadcrumb trail (0–5) |
 | **Compact cards** | Off | Reduces card height; useful for seeing more of the chart at once |
 
-Click **Save** to apply changes. **Cancel** discards unsaved changes.
+Click **Save** to apply changes. **Cancel** closes the panel without applying unsaved changes. **Discard Changes** reverts every setting on this panel back to your last-saved values without closing the panel.
 
 > Your preferences (including the last active view, chart layout, and filters) are remembered across page reloads.
 
@@ -241,7 +250,7 @@ Click the **Excel** icon button in the org chart toolbar to download the current
 
 Open the SharePoint property pane (**Edit** → click the web part → pencil icon on the side) to configure the web part for your site. These settings apply to everyone viewing the page, and most take effect immediately as you change them — no page reload required.
 
-![SharePoint property pane showing all configuration groups](screenshots/14-property-pane.png)
+> The property pane only exists inside SharePoint's edit mode, so it isn't included in this guide's screenshots — open the pencil icon on your own page to see it.
 
 ### General
 
@@ -260,9 +269,13 @@ Open the SharePoint property pane (**Edit** → click the web part → pencil ic
 
 | Setting | Options | Description |
 |---|---|---|
-| **Chart Theme** | Modern, Minimal, Corporate, Dark | Color scheme for employee cards and the org chart |
+| **Chart Theme** | Modern, Minimal, Corporate, Dark, Custom | Color scheme for employee cards and the org chart. See [Themes](#9-themes). |
 | **Default Font Size** | 75% – 175% | Starting text scale for all users. Users can override this in their own Preferences. |
 | **Default Org Chart Layout** | Drill-Down, Top Down, Left to Right | The layout shown when a user opens the chart for the first time. Their choice is remembered after that. |
+
+When **Chart Theme** is set to **Custom**, an accent-color picker appears with:
+- A color swatch, a hex text field, and separate R/G/B number fields — all stay in sync with each other.
+- A live contrast check showing whether white text on your chosen color meets accessibility contrast guidelines. Text that would otherwise be hard to read (department badges, links, job titles) automatically uses a readable shade of your color instead of the raw color.
 
 ### Data Source
 
@@ -275,6 +288,23 @@ Controls where user and org data is loaded from.
 | **SharePoint Search** | Uses the SharePoint People Search index. Changes can take hours to appear. Provided for backwards compatibility. |
 
 > **Graph API is strongly recommended.** It is real-time and ensures that new starters, leavers, and reporting-line changes are reflected immediately.
+
+> **Data is cached locally for up to 4 hours** so the web part doesn't re-download the whole directory every time a page loads. If you know something changed and don't want to wait, click **Refresh data** in the [header bar](#2-header-bar).
+
+### Custom Attributes
+
+Surface additional Entra ID (Azure AD) fields on employee cards and profiles — for example an Employee ID, a cost center stored in an on-premises AD extension attribute, or any other field your organization tracks. Requires the **Graph API** or **Auto** data source; SharePoint Search has no generic way to read these fields.
+
+For each attribute (up to 10), configure:
+
+| Field | Description |
+|---|---|
+| **Attribute name** | The Microsoft Graph field to read. Accepts standard fields such as `employeeId`, `employeeType`, `companyName`, `city`, `state`, `country`, `postalCode`, `streetAddress`, `preferredLanguage`, `usageLocation`, `faxNumber`, `employeeHireDate`, `onPremisesSamAccountName`, or an on-premises AD extension attribute `extensionAttribute1` through `extensionAttribute15`. An invalid name shows an inline error. |
+| **Display label** | The friendly name shown to users, e.g. "Cost Center" for `extensionAttribute3`. |
+| **Show in Directory** | Adds the attribute as a field on Employee Directory cards and a column in list view. |
+| **Show in Org Chart** | Adds the attribute as a field on the person profile card. |
+
+Use **+ Add attribute** to add a row and the **×** button to remove one. A value is only shown for a person if that field actually has data in Azure AD — empty values are hidden rather than shown blank.
 
 ### User Filters
 
@@ -299,6 +329,7 @@ These filters are applied globally — hidden users do not appear in the directo
 |---|---|
 | **Top-Level User** | UPN or email of the person at the root of the org chart (e.g. `ceo@company.com`). Required. |
 | **Levels to load below root** | How many hierarchy levels to fetch on initial load (1–8). Higher values load more data upfront; lower values are faster but require more click-through to explore deep branches. |
+| **Dotted-line manager attribute** | Optional. The name of an on-premises AD extension attribute (`extensionAttribute1` through `extensionAttribute15`) that holds a secondary "dotted line" manager's email or UPN. When set, that secondary reporting relationship appears in the [Person Profile Card](#5-person-profile-card). Requires the Graph API data source. |
 | **Default Org Chart Zoom** | Starting zoom level for the org chart: Auto-fit (default), 50%, 75%, 100%, 125%, or 150%. When set to a fixed value, the chart opens at that zoom rather than fitting to the visible area. |
 
 ### Org Chart Features
@@ -329,7 +360,7 @@ These toggles show or hide individual toolbar buttons and features. Hide control
 
 ## 9. Themes
 
-The **Chart Theme** property controls the visual appearance of employee cards and the org chart. All four themes support the same set of features. Card accent colors and connector lines follow your SharePoint site's color theme automatically.
+The **Chart Theme** property controls the visual appearance of employee cards and the org chart. All five themes support the same set of features.
 
 | Theme | Description |
 |---|---|
@@ -337,8 +368,15 @@ The **Chart Theme** property controls the visual appearance of employee cards an
 | **Minimal** | Clean flat design with a subtle left-border accent; low visual noise |
 | **Corporate** | Unified blue palette, consistent with a formal enterprise look |
 | **Dark** | Dark navy background, ideal for digital signage or low-light environments |
+| **Custom** | Pick your own accent color with a color picker (hex or RGB) — see [Admin Configuration → Visual Style](#8-admin-configuration) |
 
-![Side-by-side comparison of Modern, Minimal, Corporate and Dark themes](screenshots/15-themes.png)
+| Modern | Minimal |
+|---|---|
+| ![Modern theme](screenshots/15-theme-modern.png) | ![Minimal theme](screenshots/15-theme-minimal.png) |
+| **Corporate** | **Dark** |
+| ![Corporate theme](screenshots/15-theme-corporate.png) | ![Dark theme](screenshots/15-theme-dark.png) |
+| **Custom** | |
+| ![Custom theme with a user-chosen accent color](screenshots/15-theme-custom.png) | |
 
 ---
 
@@ -353,3 +391,6 @@ The **Chart Theme** property controls the visual appearance of employee cards an
 - **Export the directory:** Click **Export** in the directory toolbar to download the current filtered list as a CSV file for use in Excel.
 - **Export the org chart:** Use the **PDF** button in the org chart toolbar to save the currently visible chart. For a complete export, click **Expand All** first.
 - **Hide room mailboxes:** If meeting rooms appear in the directory, add their naming pattern (e.g. `conf-`) to **Exclude accounts** in the property pane.
+- **See who's a big team vs. a big org:** The headcount shown on cards and profiles has two numbers — direct reports and total reports across every level below them — so you can tell a manager with a small direct team but a large overall organization apart from an individual contributor.
+- **Data feels stale?** Click **Refresh data** in the header bar to force a reload instead of waiting for the local cache to expire.
+- **Navigate the tree with a keyboard:** In the Top Down or Left to Right layouts, click a card once and then use the arrow keys to move around without a mouse.
