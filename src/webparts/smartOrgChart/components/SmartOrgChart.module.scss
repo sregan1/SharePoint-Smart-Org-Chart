@@ -21,6 +21,27 @@
   gap: 12px;
 }
 
+.headerCustom {
+  background: var(--soc-custom-accent, #{$ms-color-themePrimary});
+
+  .viewTitle,
+  .companyName,
+  .viewIcon { color: var(--soc-custom-accent-contrast, #ffffff); }
+
+  .brandDivider { color: var(--soc-custom-accent-contrast, rgba(255, 255, 255, 0.5)); opacity: 0.6; }
+
+  .actionBtn {
+    color: var(--soc-custom-accent-contrast, rgba(255, 255, 255, 0.8)) !important;
+
+    i { color: var(--soc-custom-accent-contrast, rgba(255, 255, 255, 0.8)) !important; }
+
+    &:hover {
+      background: rgba(0, 0, 0, 0.12) !important;
+      i { color: var(--soc-custom-accent-contrast, #ffffff) !important; }
+    }
+  }
+}
+
 .brandArea {
   display: flex;
   align-items: center;
@@ -51,9 +72,11 @@
 
 .companyName {
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
   color: #ffffff;
   white-space: nowrap;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
 .brandDivider {

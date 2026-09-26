@@ -23,6 +23,8 @@
         "useDemoData": false,
         "companyName": "",
         "logoUrl": "",
+        "directoryLabel": "",
+        "orgChartLabel": "",
         "theme": "modern",
         "accentColor": "#0078d4",
         "defaultLayout": "drill",

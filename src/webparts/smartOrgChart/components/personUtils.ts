@@ -1,5 +1,6 @@
 // Shared person-rendering helpers used by both the Employee Directory and the Org Chart.
 import { PresenceAvailability } from '../../../services/GraphService';
+import * as strings from 'SmartOrgChartWebPartStrings';
 
 export const PRESENCE_COLOR: Record<PresenceAvailability, string> = {
   Available:    '#6BB700',
@@ -12,8 +13,8 @@ export const PRESENCE_COLOR: Record<PresenceAvailability, string> = {
 };
 
 export const PRESENCE_LABEL: Record<PresenceAvailability, string> = {
-  Available: 'Available', Busy: 'Busy', DoNotDisturb: 'Do Not Disturb',
-  BeRightBack: 'Be Right Back', Away: 'Away', Offline: 'Offline', Unknown: '',
+  Available: strings.Presence_Available, Busy: strings.Presence_Busy, DoNotDisturb: strings.Presence_DoNotDisturb,
+  BeRightBack: strings.Presence_BeRightBack, Away: strings.Presence_Away, Offline: strings.Presence_Offline, Unknown: '',
 };
 
 export function getInitials(displayName: string): string {

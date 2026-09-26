@@ -1710,6 +1710,8 @@
   $accentSoft:  var(--soc-custom-accent-soft, #eef4ff);
   $accentLine:  var(--soc-custom-accent-line, #c7e0f4);
 
+  .chartToolbar { border-bottom: 2px solid $accent; }
+
   .chartActionBtn:hover,
   .iconToolBtn:hover { background: $accentSoft; border-color: $accent; color: $accentText; }
   .iconToolBtnActive { background: $accentSoft !important; border-color: $accent !important; color: $accentText !important; }

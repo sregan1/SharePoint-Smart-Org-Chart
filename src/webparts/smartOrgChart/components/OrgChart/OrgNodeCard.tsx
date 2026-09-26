@@ -3,6 +3,8 @@ import { Icon } from '@fluentui/react/lib/Icon';
 import { IGraphUser, IOrgNode, PresenceAvailability } from '../../../../services/GraphService';
 import { PRESENCE_COLOR, getInitials } from '../personUtils';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './OrgChart.module.scss';
 
 /* ── Presence dot ────────────────────────── */
@@ -78,10 +80,10 @@ const OrgNodeCardInner: React.FC<IOrgNodeCardProps> = ({
     ? { borderLeft: `3px solid ${t.accent}`, borderTop: '1px solid #d8d8d8', opacity: isDisabled ? 0.55 : 1 }
     : { borderTopColor: t.accent, opacity: isDisabled ? 0.55 : 1 };
 
-  const actionLabel = cardActionLabel || `View ${user.displayName}'s profile`;
-  const cornerLabel = cornerActionLabel || `Focus org chart on ${user.displayName}`;
+  const actionLabel = cardActionLabel || formatString(strings.OrgNode_ViewProfile, { name: user.displayName });
+  const cornerLabel = cornerActionLabel || formatString(strings.OrgNode_FocusOrgChartOn, { name: user.displayName });
   const expandLabel = expandActionLabel ||
-    `${node.isExpanded ? 'Collapse' : 'Expand'} ${user.displayName}'s direct reports`;
+    `${node.isExpanded ? strings.OrgNode_Collapse : strings.OrgNode_Expand} ${formatString(strings.OrgNode_DirectReportsSuffix, { name: user.displayName })}`;
   const accessibleName = `${user.displayName}${user.jobTitle ? `, ${user.jobTitle}` : ''}. ${actionLabel}`;
   // Inner buttons follow the card's tab stop so Tab moves out of the tree
   // instead of walking every card's buttons.
@@ -154,7 +156,7 @@ const OrgNodeCardInner: React.FC<IOrgNodeCardProps> = ({
           className={styles.nodeDept}
           style={{ background: isDisabled ? '#fde7e9' : '#fff4ce', color: isDisabled ? '#c50f1f' : '#835c00' }}
         >
-          {isDisabled ? 'Disabled' : 'Guest'}
+          {isDisabled ? strings.OrgNode_StatusDisabled : strings.OrgNode_StatusGuest}
         </div>
       )}
       {hasReports && (
@@ -180,8 +182,8 @@ const OrgNodeCardInner: React.FC<IOrgNodeCardProps> = ({
       {hasReports && !isExpanding && totalReportCount > directReportCount && (
         <span
           className={styles.totalReportBadge}
-          title={`${totalReportCount} people across all levels below ${user.displayName}`}
-          aria-label={`${totalReportCount} people across all levels below ${user.displayName}`}
+          title={formatString(strings.OrgNode_TotalReportsAcrossLevels, { count: totalReportCount, name: user.displayName })}
+          aria-label={formatString(strings.OrgNode_TotalReportsAcrossLevels, { count: totalReportCount, name: user.displayName })}
           role="note"
         >
           <Icon iconName="Group" />

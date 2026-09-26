@@ -5,6 +5,8 @@ import { GraphService, IGraphUser, IOrgNode, PresenceAvailability } from '../../
 import { getInitials } from '../personUtils';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
 import { OrgNodeCard, PresenceDot } from './OrgNodeCard';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './OrgChart.module.scss';
 
 /* ── Drill-down view ─────────────────────── */
@@ -67,12 +69,12 @@ export const DrillView: React.FC<IDrillViewProps> = ({
 
       {/* Breadcrumb nav — only shown when drilled deeper than root */}
       {drillPath.length > 1 && (
-        <nav className={styles.drillNav} aria-label="Reporting line">
+        <nav className={styles.drillNav} aria-label={strings.Drill_ReportingLineAria}>
           <button
             className={styles.drillNavHomeBtn}
             onClick={onReturnToRoot}
-            title="Back to top"
-            aria-label="Back to top of the org chart"
+            title={strings.Drill_BackToTopTitle}
+            aria-label={strings.Drill_BackToTopAria}
           >
             <Icon iconName="Home" />
           </button>
@@ -82,7 +84,7 @@ export const DrillView: React.FC<IDrillViewProps> = ({
               <button
                 className={styles.drillNavItem}
                 onClick={() => onNavigate(i)}
-                title={`Go back to ${person.displayName}`}
+                title={formatString(strings.Drill_GoBackTo, { name: person.displayName })}
               >
                 <span className={styles.drillNavInitials} style={initialsStyle}>
                   {getInitials(person.displayName)}
@@ -150,11 +152,11 @@ export const DrillView: React.FC<IDrillViewProps> = ({
           <button
             className={styles.drillCurrentProfileBtn}
             onClick={() => onShowProfile(currentUser)}
-            title="View profile"
-            aria-label={`View ${currentUser.displayName}'s profile`}
+            title={strings.Drill_ViewProfileTitle}
+            aria-label={formatString(strings.Drill_ViewProfileAria, { name: currentUser.displayName })}
           >
             <Icon iconName="Contact" />
-            <span>Profile</span>
+            <span>{strings.Drill_ProfileButton}</span>
           </button>
         </div>
       )}
@@ -163,18 +165,18 @@ export const DrillView: React.FC<IDrillViewProps> = ({
       <div className={styles.drillBody}>
         {drillLoadingId && !allReports.find(u => u.id === drillLoadingId) ? (
           <div className={styles.drillSpinner}>
-            <Spinner size={SpinnerSize.medium} label="Loading..." />
+            <Spinner size={SpinnerSize.medium} label={strings.Drill_LoadingLabel} />
           </div>
         ) : visibleReports.length > 0 ? (
           <>
             <div className={styles.drillSectionTitle}>
-              Direct Reports &nbsp;
+              {strings.Drill_DirectReports} &nbsp;
               <span className={styles.drillSectionCount}>{visibleReports.length}</span>
             </div>
             <div
               className={`${styles.drillReportsGrid} ${compactCards ? styles.compactMode : ''}`}
               role="list"
-              aria-label={currentUser ? `Direct reports of ${currentUser.displayName}` : 'Direct reports'}
+              aria-label={currentUser ? formatString(strings.Drill_DirectReportsOfAria, { name: currentUser.displayName }) : strings.Drill_DirectReportsAria}
             >
               {visibleReports.map(report => {
                 const count = drillReportCounts.get(report.id);
@@ -200,10 +202,10 @@ export const DrillView: React.FC<IDrillViewProps> = ({
                     totalReportCount={node.totalReportCount}
                     compactCards={compactCards}
                     variant="grid"
-                    cardActionLabel={noReports ? `View ${name}'s profile` : `Show ${name}'s direct reports`}
-                    cornerActionLabel={`View ${name}'s profile`}
+                    cardActionLabel={noReports ? formatString(strings.Drill_ViewPersonProfile, { name }) : formatString(strings.Drill_ShowPersonReports, { name })}
+                    cornerActionLabel={formatString(strings.Drill_ViewPersonProfile, { name })}
                     cornerActionIcon="Contact"
-                    expandActionLabel={`Show ${name}'s direct reports`}
+                    expandActionLabel={formatString(strings.Drill_ShowPersonReports, { name })}
                     onToggle={onDrillToggle}
                     onCardClick={onDrillInto}
                     onFocus={onShowProfile}
@@ -214,7 +216,7 @@ export const DrillView: React.FC<IDrillViewProps> = ({
           </>
         ) : (
           <div className={styles.drillNoReports}>
-            No direct reports
+            {strings.Drill_NoDirectReports}
           </div>
         )}
       </div>

@@ -8,6 +8,8 @@ import { IEmployeeDirectoryProps } from './IEmployeeDirectoryProps';
 import { exportDirectoryToExcel } from '../../../../services/PdfExportService';
 import { PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
 import { getAccentCssVars } from '../colorUtils';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './EmployeeDirectory.module.scss';
 
 // '#' collects names that don't start with A–Z (digits, symbols, other scripts)
@@ -199,8 +201,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
     } catch (err) {
       const detail = err instanceof Error && err.message
         ? err.message
-        : 'Ensure the web part has User.Read.All permission.';
-      if (this._mounted) this.setState({ isLoading: false, error: `Failed to load employees. ${detail}` });
+        : strings.Directory_LoadFailedFallback;
+      if (this._mounted) this.setState({ isLoading: false, error: formatString(strings.Directory_LoadFailedPrefix, { detail }) });
     }
   }
 
@@ -281,14 +283,6 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
     return this._dirAttrs;
   }
 
-  /** Direct/total report counts for the "Manages N (M total)" line — omitted for individual contributors. */
-  private _getHeadcount(user: IGraphUser): { direct: number; total: number } | null {
-    const direct = this.props.graphService.getDirectReportCount(user.id);
-    if (direct <= 0) return null;
-    const total = this.props.graphService.getTotalReportCount(user.id);
-    return { direct, total };
-  }
-
   /** Department and office dropdown options — rebuilt only when the user list changes. */
   private _ensureOptions(): void {
     const { users } = this.state;
@@ -299,8 +293,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
       users.forEach(u => { const v = get(u); if (v && !seen[v]) { seen[v] = true; out.push(v); } });
       return out.sort();
     };
-    this._deptOptions = [{ key: '', text: 'All Departments' }, ...collect(u => u.department).map(d => ({ key: d, text: d }))];
-    this._officeOptions = [{ key: '', text: 'All Offices' }, ...collect(u => u.officeLocation).map(o => ({ key: o, text: o }))];
+    this._deptOptions = [{ key: '', text: strings.Directory_AllDepartments }, ...collect(u => u.department).map(d => ({ key: d, text: d }))];
+    this._officeOptions = [{ key: '', text: strings.Directory_AllOffices }, ...collect(u => u.officeLocation).map(o => ({ key: o, text: o }))];
     this._optionsUsers = users;
   }
 
@@ -417,7 +411,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
           aria-hidden="true"
           title={label}
         />
-        <span className={styles.srOnly}>{`Status: ${label}`}</span>
+        <span className={styles.srOnly}>{formatString(strings.Directory_PresenceStatus, { status: label })}</span>
       </>
     );
   }
@@ -449,15 +443,13 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
       <div ref={this._gridRef} className={`${styles.grid} ${styles[`size_${cardSize}`]}`}>
         {paged.map(user => {
           const phone = this._getPhone(user);
-          const headcount = this._getHeadcount(user);
           const visibleAttrs = dirAttrs.filter(a => !!(user.customAttributes && user.customAttributes[a.graphField]));
           const hasDetails =
             (showDepartment && !!user.department) ||
             (showOffice && !!user.officeLocation) ||
             (showEmail && !!user.mail) ||
             (showPhone && !!phone) ||
-            visibleAttrs.length > 0 ||
-            !!headcount;
+            visibleAttrs.length > 0;
           return (
             <div key={user.id} className={styles.card}>
               <div className={styles.cardHeader}>
@@ -470,10 +462,10 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                   {user.jobTitle && <div className={styles.jobTitle}>{user.jobTitle}</div>}
                   <div className={styles.statusBadges}>
                     {user.accountEnabled === false && (
-                      <span className={`${styles.statusBadge} ${styles.statusDisabled}`}>Disabled</span>
+                      <span className={`${styles.statusBadge} ${styles.statusDisabled}`}>{strings.Directory_StatusDisabled}</span>
                     )}
                     {user.userType === 'Guest' && (
-                      <span className={`${styles.statusBadge} ${styles.statusGuest}`}>Guest</span>
+                      <span className={`${styles.statusBadge} ${styles.statusGuest}`}>{strings.Directory_StatusGuest}</span>
                     )}
                   </div>
                 </div>
@@ -481,8 +473,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                   <a
                     href={this._teamsChatUrl(user.mail)}
                     target="_blank" rel="noopener noreferrer"
-                    className={styles.chatBtn} title="Chat in Teams"
-                    aria-label={`Chat with ${user.displayName} in Teams`}
+                    className={styles.chatBtn} title={strings.Directory_ChatInTeams}
+                    aria-label={formatString(strings.Directory_ChatWithInTeams, { name: user.displayName })}
                     onClick={e => e.stopPropagation()}
                   >
                     <Icon iconName="Chat" aria-hidden="true" />
@@ -521,15 +513,6 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                       <span>{attr.label}: {user.customAttributes?.[attr.graphField]}</span>
                     </div>
                   ))}
-                  {headcount && (
-                    <div className={`${styles.detail} ${styles.headcount}`}>
-                      <Icon iconName="Group" className={styles.detailIcon} />
-                      <span>
-                        Manages {headcount.direct}
-                        {headcount.total !== headcount.direct && ` (${headcount.total} total)`}
-                      </span>
-                    </div>
-                  )}
                 </div>
               )}
             </div>
@@ -547,23 +530,21 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
       <table className={styles.listTable}>
         <thead>
           <tr className={styles.listHead}>
-            <th scope="col" className={styles.listTh}>Name</th>
-            <th scope="col" className={styles.listTh}>Job Title</th>
-            {showDepartment && <th scope="col" className={styles.listTh}>Department</th>}
-            {showOffice && <th scope="col" className={styles.listTh}>Office</th>}
+            <th scope="col" className={styles.listTh}>{strings.Directory_ColumnName}</th>
+            <th scope="col" className={styles.listTh}>{strings.Directory_ColumnJobTitle}</th>
+            {showDepartment && <th scope="col" className={styles.listTh}>{strings.Directory_ColumnDepartment}</th>}
+            {showOffice && <th scope="col" className={styles.listTh}>{strings.Directory_ColumnOffice}</th>}
             {dirAttrs.map(attr => (
               <th scope="col" className={styles.listTh} key={attr.id} title={attr.label}>{attr.label}</th>
             ))}
-            {showEmail && <th scope="col" className={styles.listTh}>Email</th>}
-            {showPhone && <th scope="col" className={styles.listTh}>Phone</th>}
-            <th scope="col" className={styles.listTh}>Reports</th>
-            <th scope="col" className={styles.listTh}><span className={styles.srOnly}>Chat</span></th>
+            {showEmail && <th scope="col" className={styles.listTh}>{strings.Directory_ColumnEmail}</th>}
+            {showPhone && <th scope="col" className={styles.listTh}>{strings.Directory_ColumnPhone}</th>}
+            <th scope="col" className={styles.listTh}><span className={styles.srOnly}>{strings.Directory_ColumnChat}</span></th>
           </tr>
         </thead>
         <tbody>
           {paged.map(user => {
             const phone = this._getPhone(user);
-            const headcount = this._getHeadcount(user);
             return (
               <tr key={user.id} className={styles.listRow}>
                 <td className={styles.listTd}>
@@ -574,10 +555,10 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                     </div>
                     <span className={styles.listName}>{user.displayName}</span>
                     {user.accountEnabled === false && (
-                      <span className={`${styles.statusBadge} ${styles.statusDisabled}`}>Disabled</span>
+                      <span className={`${styles.statusBadge} ${styles.statusDisabled}`}>{strings.Directory_StatusDisabled}</span>
                     )}
                     {user.userType === 'Guest' && (
-                      <span className={`${styles.statusBadge} ${styles.statusGuest}`}>Guest</span>
+                      <span className={`${styles.statusBadge} ${styles.statusGuest}`}>{strings.Directory_StatusGuest}</span>
                     )}
                   </div>
                 </td>
@@ -609,22 +590,12 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                   </td>
                 )}
                 <td className={styles.listTd}>
-                  {headcount
-                    ? (
-                      <span className={styles.listHeadcount}>
-                        {headcount.direct}
-                        {headcount.total !== headcount.direct && ` (${headcount.total} total)`}
-                      </span>
-                    )
-                    : <span className={styles.listCell}>—</span>}
-                </td>
-                <td className={styles.listTd}>
                   {user.mail && (
                     <a
                       href={this._teamsChatUrl(user.mail)}
                       target="_blank" rel="noopener noreferrer"
-                      className={styles.listChatBtn} title="Chat in Teams"
-                      aria-label={`Chat with ${user.displayName} in Teams`}
+                      className={styles.listChatBtn} title={strings.Directory_ChatInTeams}
+                      aria-label={formatString(strings.Directory_ChatWithInTeams, { name: user.displayName })}
                     >
                       <Icon iconName="Chat" aria-hidden="true" />
                     </a>
@@ -645,18 +616,18 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
           className={styles.pageBtn}
           onClick={() => this._goToPage(Math.max(1, safePage - 1))}
           disabled={safePage === 1}
-          aria-label="Previous page"
+          aria-label={strings.Directory_PreviousPageAria}
         >
-          <Icon iconName="ChevronLeft" aria-hidden="true" /> Prev
+          <Icon iconName="ChevronLeft" aria-hidden="true" /> {strings.Directory_PrevPage}
         </button>
         <span className={styles.pageInfo}>{safePage} / {totalPages}</span>
         <button
           className={styles.pageBtn}
           onClick={() => this._goToPage(Math.min(totalPages, safePage + 1))}
           disabled={safePage === totalPages}
-          aria-label="Next page"
+          aria-label={strings.Directory_NextPageAria}
         >
-          Next <Icon iconName="ChevronRight" aria-hidden="true" />
+          {strings.Directory_NextPage} <Icon iconName="ChevronRight" aria-hidden="true" />
         </button>
       </>
     );
@@ -668,7 +639,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
     const { pageSize } = this.props;
 
     if (isLoading) return (
-      <div className={styles.centered}><Spinner size={SpinnerSize.large} label="Loading employees..." /></div>
+      <div className={styles.centered}><Spinner size={SpinnerSize.large} label={strings.Directory_LoadingLabel} /></div>
     );
 
     if (error) return (
@@ -704,8 +675,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
         {/* ── Top bar: search + filters + view toggle ── */}
         <div className={styles.toolbar}>
           <SearchBox
-            placeholder="Search by name, title, email, or department..."
-            ariaLabel="Search people"
+            placeholder={strings.Directory_SearchPlaceholder}
+            ariaLabel={strings.Directory_SearchAria}
             value={searchInput}
             onChange={(_, v) => this._onSearch(v || '')}
             className={styles.searchBox}
@@ -714,8 +685,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
 
           {deptOptions.length > 2 && (
             <Dropdown
-              placeholder="Department"
-              ariaLabel="Filter by department"
+              placeholder={strings.Directory_ColumnDepartment}
+              ariaLabel={strings.Directory_FilterByDepartmentAria}
               selectedKey={selectedDepartment}
               options={deptOptions}
               onChange={(_, o) => o && this.setState({ selectedDepartment: o.key as string, currentPage: 1 })}
@@ -725,8 +696,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
 
           {officeOptions.length > 2 && (
             <Dropdown
-              placeholder="Office"
-              ariaLabel="Filter by office"
+              placeholder={strings.Directory_ColumnOffice}
+              ariaLabel={strings.Directory_FilterByOfficeAria}
               selectedKey={selectedOffice}
               options={officeOptions}
               onChange={(_, o) => o && this.setState({ selectedOffice: o.key as string, currentPage: 1 })}
@@ -735,8 +706,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
           )}
 
           {anythingToClear && (
-            <button className={styles.clearBtn} onClick={this._clearFilters} title="Clear search and all filters">
-              <Icon iconName="Cancel" aria-hidden="true" /> Clear
+            <button className={styles.clearBtn} onClick={this._clearFilters} title={strings.Directory_ClearSearchTitle}>
+              <Icon iconName="Cancel" aria-hidden="true" /> {strings.Directory_ClearButton}
             </button>
           )}
 
@@ -744,18 +715,18 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
             className={styles.exportExcelBtn}
             onClick={() => this.exportExcel()}
             disabled={filtered.length === 0}
-            title="Export all filtered results to a CSV file (opens in Excel)"
+            title={strings.Directory_ExportCsvTitle}
           >
             <Icon iconName="Download" aria-hidden="true" />
-            <span>Export CSV</span>
+            <span>{strings.Directory_ExportCsvButton}</span>
           </button>
 
-          <div className={styles.viewToggle} role="group" aria-label="View mode">
+          <div className={styles.viewToggle} role="group" aria-label={strings.Directory_ViewModeAria}>
             <button
               className={`${styles.viewBtn} ${viewMode === 'card' ? styles.viewBtnActive : ''}`}
               onClick={() => this._setViewMode('card')}
-              title="Card view"
-              aria-label="Card view"
+              title={strings.Directory_CardViewTitle}
+              aria-label={strings.Directory_CardViewTitle}
               aria-pressed={viewMode === 'card'}
             >
               <Icon iconName="GridViewMedium" aria-hidden="true" />
@@ -763,8 +734,8 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
             <button
               className={`${styles.viewBtn} ${viewMode === 'list' ? styles.viewBtnActive : ''}`}
               onClick={() => this._setViewMode('list')}
-              title="List view"
-              aria-label="List view"
+              title={strings.Directory_ListViewTitle}
+              aria-label={strings.Directory_ListViewTitle}
               aria-pressed={viewMode === 'list'}
             >
               <Icon iconName="BulletedList" aria-hidden="true" />
@@ -773,7 +744,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
         </div>
 
         {/* ── Alphabet bar ── */}
-        <div className={styles.alphabetBar} role="toolbar" aria-label="Alphabet filter">
+        <div className={styles.alphabetBar} role="toolbar" aria-label={strings.Directory_AlphabetFilterAria}>
           {ALPHABET.map(letter => {
             const isActive = selectedLetter === letter && !hasSearch;
             return (
@@ -782,7 +753,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                 className={`${styles.letterBtn} ${isActive ? styles.active : ''}`}
                 onClick={() => this._selectLetter(letter)}
                 aria-pressed={isActive}
-                title={letter === 'All' ? 'Show all' : letter === OTHER_BUCKET ? 'Filter by names starting with a number or other character' : `Filter by ${letter}`}
+                title={letter === 'All' ? strings.Directory_ShowAllTitle : letter === OTHER_BUCKET ? strings.Directory_OtherLettersTitle : formatString(strings.Directory_FilterByLetterTitle, { letter })}
               >
                 {letter}
               </button>
@@ -793,9 +764,13 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
         {/* ── Result count + top pagination ── */}
         <div className={styles.resultMeta}>
           <span aria-live="polite">
-            {filtered.length} {filtered.length === 1 ? 'person' : 'people'}
-            {totalPages > 1 && ` · page ${safePage} of ${totalPages}`}
-            {activeFilters > 0 && <span className={styles.filterBadge}>{activeFilters} filter{activeFilters > 1 ? 's' : ''} active</span>}
+            {filtered.length} {filtered.length === 1 ? strings.Directory_ResultCountSingular : strings.Directory_ResultCountPlural}
+            {totalPages > 1 && formatString(strings.Directory_PageOf, { page: safePage, totalPages })}
+            {activeFilters > 0 && (
+              <span className={styles.filterBadge}>
+                {formatString(activeFilters > 1 ? strings.Directory_FilterActivePlural : strings.Directory_FilterActiveSingular, { count: activeFilters })}
+              </span>
+            )}
           </span>
           {totalPages > 1 && (
             <div className={styles.paginationInline}>
@@ -810,16 +785,16 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
         {filtered.length === 0 && (
           <div className={styles.noResults}>
             <Icon iconName="SearchIssue" />
-            <span>No people found</span>
+            <span>{strings.Directory_NoResults}</span>
             {anythingToClear && (
-              <button className={styles.clearBtn} onClick={this._clearFilters}>Clear filters</button>
+              <button className={styles.clearBtn} onClick={this._clearFilters}>{strings.Directory_ClearFiltersButton}</button>
             )}
           </div>
         )}
 
         {/* ── Bottom pagination ── */}
         {totalPages > 1 && (
-          <nav className={styles.pagination} aria-label="Pagination">
+          <nav className={styles.pagination} aria-label={strings.Directory_PaginationAria}>
             {this._renderPager(safePage, totalPages)}
           </nav>
         )}

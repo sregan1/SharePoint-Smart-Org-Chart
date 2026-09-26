@@ -8,6 +8,8 @@ import { IFilterCounts } from './orgTreeUtils';
 import { CHART_LAYOUTS, ChartLayout } from './chartPersistence';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
 import { FilterPanel, UserFilterKey } from './ChartControls';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './OrgChart.module.scss';
 
 const LAYOUT_ICON: Record<ChartLayout, string> = {
@@ -17,9 +19,9 @@ const LAYOUT_ICON: Record<ChartLayout, string> = {
 };
 
 const LAYOUT_TITLE: Record<ChartLayout, string> = {
-  drill:      'Drill-Down',
-  vertical:   'Top Down',
-  horizontal: 'Left to Right',
+  drill:      strings.Chart_Layout_Drill,
+  vertical:   strings.Chart_Layout_Vertical,
+  horizontal: strings.Chart_Layout_Horizontal,
 };
 
 export interface IOrgChartToolbarProps {
@@ -117,8 +119,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       {/* Search with results dropdown */}
       <div className={styles.searchWrapper} ref={p.searchRef}>
         <SearchBox
-          placeholder="Search people..."
-          ariaLabel="Search people"
+          placeholder={strings.Chart_SearchPlaceholder}
+          ariaLabel={strings.Chart_SearchAria}
           value={p.searchQuery}
           onChange={p.onSearchChange}
           onFocus={p.onSearchFocus}
@@ -133,11 +135,11 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
         />
         {appliedQuery && !listOpen && !isDrillMode && (
           <span className={styles.chartSearchHit} role="status">
-            {matchCount} {matchCount === 1 ? 'match' : 'matches'} in tree
+            {matchCount} {matchCount === 1 ? strings.Chart_MatchSingular : strings.Chart_MatchPlural}
           </span>
         )}
         {listOpen && (
-          <div className={styles.searchResults} role="listbox" id={listboxId} aria-label="People">
+          <div className={styles.searchResults} role="listbox" id={listboxId} aria-label={strings.Chart_ResultsListAria}>
             {searchResults.map((u, i) => (
               <div
                 key={u.id}
@@ -165,10 +167,10 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       {!isDrillMode && (
         <div className={styles.chartActions}>
           <button className={styles.chartActionBtn} onClick={p.onExpandAll} disabled={p.isExpandingAll}>
-            <Icon iconName="ExploreContent" /> Expand All
+            <Icon iconName="ExploreContent" /> {strings.Chart_ExpandAll}
           </button>
           <button className={styles.chartActionBtn} onClick={p.onCollapseAll}>
-            <Icon iconName="CollapseContent" /> Collapse All
+            <Icon iconName="CollapseContent" /> {strings.Chart_CollapseAll}
           </button>
         </div>
       )}
@@ -176,7 +178,7 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       {/* Inline progress for re-rooting / Expand All (the chart stays on screen) */}
       {isBusy && (
         <span className={styles.refocusIndicator}>
-          <Spinner size={SpinnerSize.xSmall} ariaLive="polite" label={p.isExpandingAll ? 'Expanding…' : 'Loading…'} labelPosition="right" />
+          <Spinner size={SpinnerSize.xSmall} ariaLive="polite" label={p.isExpandingAll ? strings.Chart_Expanding : strings.Chart_Loading} labelPosition="right" />
         </span>
       )}
 
@@ -185,8 +187,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
         <button
           className={styles.iconToolBtn}
           onClick={p.onFindMe}
-          title="Find me in the org chart"
-          aria-label="Find me in the org chart"
+          title={strings.Chart_FindMeTitle}
+          aria-label={strings.Chart_FindMeTitle}
         >
           <Icon iconName="Contact" />
         </button>
@@ -198,16 +200,16 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
           <button
             className={`${styles.chartActionBtn} ${p.showLayoutPicker ? styles.iconToolBtnActive : ''}`}
             onClick={p.onToggleLayoutPicker}
-            title="Switch view layout"
+            title={strings.Chart_ViewLayoutTitle}
             aria-haspopup="true"
             aria-expanded={p.showLayoutPicker}
           >
             <Icon iconName="ViewAll" />
-            <span>View</span>
+            <span>{strings.Chart_ViewLayoutButton}</span>
           </button>
           {p.showLayoutPicker && (
-            <div className={styles.filterPanel} style={{ minWidth: 210 }} role="group" aria-label="View layout">
-              <div className={styles.filterPanelTitle}>View layout</div>
+            <div className={styles.filterPanel} style={{ minWidth: 210 }} role="group" aria-label={strings.Chart_ViewLayoutPanelTitle}>
+              <div className={styles.filterPanelTitle}>{strings.Chart_ViewLayoutPanelTitle}</div>
               {CHART_LAYOUTS.map(layout => {
                 const selected = p.chartLayout === layout;
                 return (
@@ -247,8 +249,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
         <button
           className={`${styles.iconToolBtn} ${p.showStats ? styles.iconToolBtnActive : ''}`}
           onClick={p.onToggleStats}
-          title="Org stats summary"
-          aria-label="Org stats summary"
+          title={strings.Chart_StatsSummaryTitle}
+          aria-label={strings.Chart_StatsSummaryTitle}
           aria-pressed={p.showStats}
         >
           <Icon iconName="BarChartVertical" />
@@ -260,8 +262,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
         <button
           className={`${styles.iconToolBtn} ${deptCount > 0 ? styles.iconToolBtnActive : ''}`}
           onClick={p.onToggleDeptFilter}
-          title="Filter by department"
-          aria-label={deptCount > 0 ? `Filter by department (${deptCount} selected)` : 'Filter by department'}
+          title={strings.Chart_FilterByDepartmentTitle}
+          aria-label={deptCount > 0 ? formatString(strings.Chart_FilterByDepartmentWithCountAria, { count: deptCount }) : strings.Chart_FilterByDepartmentTitle}
           aria-haspopup="true"
           aria-expanded={p.showDeptFilter}
         >
@@ -269,8 +271,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
           {deptCount > 0 && <span className={styles.toolBtnBadge}>{deptCount}</span>}
         </button>
         {p.showDeptFilter && (
-          <div className={styles.filterPanel} style={{ minWidth: 220 }} role="group" aria-label="Filter by department">
-            <div className={styles.filterPanelTitle}>Filter by department</div>
+          <div className={styles.filterPanel} style={{ minWidth: 220 }} role="group" aria-label={strings.Chart_FilterByDepartmentPanelTitle}>
+            <div className={styles.filterPanelTitle}>{strings.Chart_FilterByDepartmentPanelTitle}</div>
             {Array.from(p.uniqueDepts.entries()).sort((a, b) => a[0].localeCompare(b[0])).map(([dept, count]) => (
               <label key={dept} className={styles.filterItem}>
                 <input
@@ -289,7 +291,7 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
                 style={{ border: 'none', background: 'none', cursor: 'pointer', color: t.linkText, fontWeight: 600, fontSize: 12 }}
                 onClick={p.onClearDeptFilter}
               >
-                Clear all filters
+                {strings.Chart_ClearAllFilters}
               </button>
             )}
           </div>
@@ -302,8 +304,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
           <button
             className={`${styles.iconToolBtn} ${activeFilters > 0 ? styles.iconToolBtnActive : ''}`}
             onClick={p.onToggleUserFilterPanel}
-            title="Filter user types"
-            aria-label="Filter user types"
+            title={strings.Chart_FilterUserTypesTitle}
+            aria-label={strings.Chart_FilterUserTypesTitle}
             aria-haspopup="true"
             aria-expanded={p.showFilters}
           >
@@ -323,10 +325,10 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       )}
 
       {/* Export PDF / CSV */}
-      <button className={styles.iconToolBtn} onClick={p.onExportPdf} title="Download as PDF" aria-label="Download as PDF">
+      <button className={styles.iconToolBtn} onClick={p.onExportPdf} title={strings.Chart_DownloadPdfTitle} aria-label={strings.Chart_DownloadPdfTitle}>
         <Icon iconName="PDF" />
       </button>
-      <button className={styles.iconToolBtn} onClick={p.onExportCsv} title="Download as CSV spreadsheet" aria-label="Download as CSV spreadsheet">
+      <button className={styles.iconToolBtn} onClick={p.onExportCsv} title={strings.Chart_DownloadCsvTitle} aria-label={strings.Chart_DownloadCsvTitle}>
         <Icon iconName="ExcelDocument" />
       </button>
 
@@ -339,8 +341,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
             <button
               className={styles.rootPickerReset}
               onClick={p.onResetRoot}
-              title="Reset to default root"
-              aria-label="Reset to default root"
+              title={strings.Chart_ResetRootTitle}
+              aria-label={strings.Chart_ResetRootTitle}
             >
               <Icon iconName="Cancel" />
             </button>
@@ -352,8 +354,8 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
               <input
                 type="text"
                 className={styles.rootPickerInput}
-                placeholder="View from person…"
-                aria-label="View the org chart from a person"
+                placeholder={strings.Chart_ViewFromPersonPlaceholder}
+                aria-label={strings.Chart_ViewFromPersonAria}
                 value={p.rootPickerQuery}
                 onChange={p.onRootPickerChange}
               />
@@ -384,14 +386,14 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       {/* Zoom — only in full-tree mode */}
       {!isDrillMode && (
         <div className={styles.zoomControls}>
-          <button className={styles.zoomBtn} onClick={p.onZoomOut} title="Zoom out" aria-label="Zoom out" disabled={p.zoomLevel <= 0.25}>
+          <button className={styles.zoomBtn} onClick={p.onZoomOut} title={strings.Chart_ZoomOutTitle} aria-label={strings.Chart_ZoomOutTitle} disabled={p.zoomLevel <= 0.25}>
             <Icon iconName="Remove" />
           </button>
           <span className={styles.zoomLabel} aria-live="polite">{Math.round(p.zoomLevel * 100)}%</span>
-          <button className={styles.zoomBtn} onClick={p.onZoomIn} title="Zoom in" aria-label="Zoom in" disabled={p.zoomLevel >= 1.5}>
+          <button className={styles.zoomBtn} onClick={p.onZoomIn} title={strings.Chart_ZoomInTitle} aria-label={strings.Chart_ZoomInTitle} disabled={p.zoomLevel >= 1.5}>
             <Icon iconName="Add" />
           </button>
-          <button className={styles.zoomBtn} onClick={p.onZoomReset} title="Reset zoom" aria-label="Reset zoom" disabled={p.zoomLevel === p.resetZoom}>
+          <button className={styles.zoomBtn} onClick={p.onZoomReset} title={strings.Chart_ZoomResetTitle} aria-label={strings.Chart_ZoomResetTitle} disabled={p.zoomLevel === p.resetZoom}>
             <Icon iconName="Refresh" />
           </button>
         </div>

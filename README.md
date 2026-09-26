@@ -20,6 +20,7 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | **List view** | Compact single-row list alternative to the card grid |
 | **Real-time search** | Filters by name, title, email, or department as you type |
 | **A–Z filter** | Alphabet bar, switchable between first name or last name |
+| **Department & office filters** | Dropdown filters appear automatically whenever more than one distinct value exists |
 | **Pagination** | Configurable cards-per-page (10–200) |
 | **Export to CSV** | Downloads the current filtered list as an Excel-compatible CSV file |
 
@@ -54,11 +55,13 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | Feature | Detail |
 |---|---|
 | **User account filters** | Hide disabled accounts, guests, accounts without a job title or department; exclude by name/email pattern; restrict to tenant domain — reports of a hidden manager are re-linked to the next visible manager, so hiding an account never orphans part of the org chart |
-| **Themes** | Modern, Minimal, Corporate, Dark, and Custom (pick your own accent color, with a built-in contrast check) |
+| **Themes** | Modern, Minimal, Corporate, Dark, and Custom (pick your own accent color, with a built-in contrast check — applied to cards, the chart, and the header bar) |
 | **Configurable data source** | Graph API (real-time), SharePoint Search (legacy), or Auto (Graph with SP Search fallback) |
 | **Local data caching** | User/org data is cached locally for up to 4 hours; a header-bar **Refresh data** button forces an immediate reload |
 | **User preferences** | Per-user card size, font size, visible fields, compact mode — saved to `localStorage` |
 | **Configurable zoom & font size** | Admin sets defaults; users can override font size in their own preferences |
+| **Customizable view labels** | Admin can rename the "Employee Directory" and "Org Chart" labels shown in the header bar |
+| **30 languages** | Interface automatically follows each user's Microsoft 365 display-language setting — see [Localization](#localization) |
 | **Demo mode** | Built-in mock data (150 / 500 / 1,000 people) — no Graph permissions needed; auto-fills Top-Level User with the sample CEO if it's empty |
 
 ![Employee Directory card grid view](docs/screenshots/03-directory-overview.png)
@@ -171,6 +174,8 @@ All settings below are configured in the web part property pane (edit the page �
 |---|---|---|
 | **App Title** | _(empty)_ | Text shown in the header bar alongside the current view name |
 | **Logo URL** | _(empty)_ | Full URL to a PNG/SVG/JPG logo (e.g. `https://contoso.sharepoint.com/sites/mysite/SiteAssets/logo.png`) |
+| **Employee Directory View Label** | _(empty)_ | Overrides the "Employee Directory" name shown in the header bar; blank uses the default (localized) name; type `[blank]` to hide the label entirely |
+| **Org Chart View Label** | _(empty)_ | Overrides the "Org Chart" name shown in the header bar; blank uses the default (localized) name; type `[blank]` to hide the label entirely |
 
 ### Visual Style
 
@@ -256,6 +261,14 @@ Each user can personalise their own experience. Settings are saved to `localStor
 
 ---
 
+## Localization
+
+The web part's interface (not your directory data) is translated into 30 languages: English, Spanish, French, German, Italian, Portuguese (Brazil & Portugal), Dutch, Swedish, Danish, Norwegian (Bokmål), Finnish, Polish, Czech, Hungarian, Romanian, Ukrainian, Russian, Greek, Chinese (Simplified & Traditional), Japanese, Korean, Arabic, Hebrew, Turkish, Hindi, Thai, Vietnamese, and Indonesian.
+
+The displayed language is determined automatically by each signed-in user's Microsoft 365 display-language setting (`pageContext.cultureInfo`), or the SharePoint site's default language if the user hasn't set a personal preference — it does **not** depend on the operating system's language. Any language not in the list above falls back to English. Right-to-left mirroring for Arabic/Hebrew is not yet implemented (see [Limitations](#limitations)).
+
+---
+
 ## Graph API Permissions
 
 The web part requires two delegated Microsoft Graph permissions, approved once per tenant by a Global Administrator or SharePoint Administrator.
@@ -298,9 +311,12 @@ SharePointSmartOrgChart/
 │   │   └── requestUtils.ts          # Shared retry/backoff helper for Graph & SP requests
 │   └── webparts/smartOrgChart/
 │       ├── SmartOrgChartWebPart.ts  # Web part entry + property pane
+│       ├── loc/                     # Localization: mystrings.d.ts + one .js per
+│       │                            #   supported locale (30 languages)
 │       └── components/
 │           ├── SmartOrgChart.tsx    # Root component — header, view switcher
 │           ├── colorUtils.ts        # Shared accent-color/contrast helpers (Custom theme)
+│           ├── localeUtils.ts       # String formatting + effective-locale helpers
 │           ├── EmployeeDirectory/   # Directory view (grid, list, filters, export)
 │           ├── OrgChart/            # Chart view (all three layouts), split into focused
 │           │                        #   modules: OrgTree, OrgNodeCard, PersonCard, DrillView,
@@ -354,6 +370,7 @@ SharePointSmartOrgChart/
 - User/org data is cached locally (in-memory and in the browser's IndexedDB) for up to 4 hours; use the **Refresh data** header button to force an immediate reload.
 - Custom Attributes require the Graph API data source — SharePoint Search has no generic way to read Entra ID attributes.
 - Node.js 18 LTS is required to build from source. SPFx 1.18 is not compatible with Node 20+.
+- Arabic and Hebrew interface text is fully translated, but the layout itself does not yet mirror right-to-left.
 
 ---
 

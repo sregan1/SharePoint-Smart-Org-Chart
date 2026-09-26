@@ -23,6 +23,8 @@ export interface IOrgChartProps {
   defaultZoom: number;
   /** Web part instance ID — scopes localStorage state so instances on different pages don't clash */
   instanceId: string;
+  /** SharePoint page's UI culture, for locale-aware date formatting in exports */
+  locale: string;
 }
 
 export interface IOrgChartState {

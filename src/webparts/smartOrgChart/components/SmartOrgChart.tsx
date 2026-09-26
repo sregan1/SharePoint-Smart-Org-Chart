@@ -8,12 +8,39 @@ import { ISmartOrgChartProps, IUserSettings } from './ISmartOrgChartProps';
 import { EmployeeDirectory } from './EmployeeDirectory/EmployeeDirectory';
 import { OrgChart } from './OrgChart/OrgChart';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
+import { getAccentCssVars } from './colorUtils';
+import { formatString, getEffectiveLocale } from './localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './SmartOrgChart.module.scss';
 
-const VIEW_META = {
-  directory: { label: 'Employee Directory', icon: 'People', toggleIcon: 'Org',  toggleTitle: 'Switch to Org Chart' },
-  orgchart:  { label: 'Org Chart',          icon: 'Org',    toggleIcon: 'People', toggleTitle: 'Switch to Employee Directory' },
-};
+// Typed literally into the "View Label" property pane fields to force that
+// header label to render as empty text, instead of falling back to the
+// default (localized) name the way an untouched/empty field does.
+const BLANK_LABEL_TOKEN = '[blank]';
+
+/**
+ * Resolves an admin-configured view label to what the header should display,
+ * and a separate name that's always non-empty for use in tooltips/aria-labels
+ * (a blank header label shouldn't make the view-toggle tooltip unreadable).
+ */
+function resolveViewLabel(raw: string, defaultLabel: string): { display: string; accessible: string } {
+  const trimmed = (raw || '').trim();
+  if (trimmed.toLowerCase() === BLANK_LABEL_TOKEN) return { display: '', accessible: defaultLabel };
+  if (!trimmed) return { display: defaultLabel, accessible: defaultLabel };
+  return { display: trimmed, accessible: trimmed };
+}
+
+function getViewMeta(directoryLabel: string, orgChartLabel: string): {
+  directory: { label: string; icon: string; toggleIcon: string; toggleTitle: string };
+  orgchart: { label: string; icon: string; toggleIcon: string; toggleTitle: string };
+} {
+  const dir = resolveViewLabel(directoryLabel, strings.Header_DirectoryLabel);
+  const org = resolveViewLabel(orgChartLabel, strings.Header_OrgChartLabel);
+  return {
+    directory: { label: dir.display, icon: 'People', toggleIcon: 'Org',  toggleTitle: formatString(strings.Header_SwitchToView, { view: org.accessible }) },
+    orgchart:  { label: org.display, icon: 'Org',    toggleIcon: 'People', toggleTitle: formatString(strings.Header_SwitchToView, { view: dir.accessible }) },
+  };
+}
 
 const LS_KEY      = 'smartOrgChart_userSettings';
 const LS_MOCK_KEY = 'smartOrgChart_mockSize';
@@ -107,14 +134,14 @@ function readCurrentView(fallback: 'directory' | 'orgchart', instanceId: string)
   return fallback;
 }
 
-function formatLastLoaded(date: Date | null): string {
-  if (!date) return 'not loaded yet';
+function formatLastLoaded(date: Date | null, locale: string): string {
+  if (!date) return strings.Header_NotLoadedYet;
   const mins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins} min ago`;
+  if (mins < 1) return strings.Header_JustNow;
+  if (mins < 60) return formatString(strings.Header_MinutesAgo, { mins });
   const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours} hr ago`;
-  return date.toLocaleString();
+  if (hours < 24) return formatString(strings.Header_HoursAgo, { hours });
+  return date.toLocaleString(locale);
 }
 
 export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOrgChartState> {
@@ -272,7 +299,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
 
   private _refreshTitle(): string {
     const service = this.state.graphService;
-    return `Refresh data (last updated ${formatLastLoaded(service ? service.getLastLoaded() : null)})`;
+    const when = formatLastLoaded(service ? service.getLastLoaded() : null, getEffectiveLocale(this.props.context));
+    return formatString(strings.Header_RefreshTitle, { when });
   }
 
   // The last-loaded time changes when the views finish loading, which doesn't
@@ -315,8 +343,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
 
   public render(): React.ReactElement<ISmartOrgChartProps> {
     const { currentView, isSettingsOpen, graphService, userSettings, mockSize, serviceGen, isRefreshing } = this.state;
-    const { theme, accentColor, defaultLayout, logoUrl, companyName } = this.props;
-    const meta        = VIEW_META[currentView];
+    const { theme, accentColor, defaultLayout, logoUrl, companyName, directoryLabel, orgChartLabel } = this.props;
+    const meta        = getViewMeta(directoryLabel, orgChartLabel)[currentView];
     const resolvedLogoUrl = (() => {
       if (!logoUrl) return '';
       if (logoUrl.startsWith('http://') || logoUrl.startsWith('https://')) return logoUrl;
@@ -328,16 +356,22 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
       return siteUrl ? `${siteUrl}/${logoUrl}` : '';
     })();
 
+    const isCustomTheme = theme === 'custom';
+    const containerStyle = {
+      '--soc-font-scale': userSettings.fontScale || 1,
+      ...(isCustomTheme ? getAccentCssVars(accentColor) : {}),
+    } as React.CSSProperties;
+
     return (
-      <div className={styles.container} style={{ '--soc-font-scale': userSettings.fontScale || 1 } as React.CSSProperties}>
-        <div className={styles.header}>
+      <div className={styles.container} style={containerStyle}>
+        <div className={`${styles.header} ${isCustomTheme ? styles.headerCustom : ''}`}>
           <div className={styles.brandArea}>
             {resolvedLogoUrl && (
               <img
                 key={resolvedLogoUrl}
                 src={resolvedLogoUrl}
                 // Decorative when the company name is shown right beside it
-                alt={companyName ? '' : 'Company logo'}
+                alt={companyName ? '' : strings.Header_CompanyLogoAlt}
                 className={styles.logo}
                 onError={e => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
               />
@@ -358,7 +392,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
             <IconButton
               iconProps={{ iconName: 'Refresh' }}
               title={this._refreshTitle()}
-              ariaLabel={isRefreshing ? 'Refreshing data' : 'Refresh data'}
+              ariaLabel={isRefreshing ? strings.Header_RefreshingAria : strings.Header_RefreshAria}
               onClick={this._refreshData}
               onMouseEnter={this._updateRefreshTitle}
               onFocus={this._updateRefreshTitle}
@@ -374,8 +408,8 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
             />
             <IconButton
               iconProps={{ iconName: 'Settings' }}
-              title="Preferences"
-              ariaLabel="Open preferences panel"
+              title={strings.Header_PreferencesTitle}
+              ariaLabel={strings.Header_PreferencesAria}
               onClick={this._openSettings}
               className={styles.actionBtn}
             />
@@ -406,6 +440,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
               key={`org-${serviceGen}`}
               graphService={graphService}
               instanceId={this._instanceId}
+              locale={getEffectiveLocale(this.props.context)}
               topLevelUser={this.props.topLevelUser}
               levelsBelow={this.props.levelsBelow}
               levelsAbove={userSettings.levelsAbove}
@@ -430,6 +465,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
         <SettingsPanel
           isOpen={isSettingsOpen}
           settings={userSettings}
+          locale={getEffectiveLocale(this.props.context)}
           onDismiss={this._closeSettings}
           onSave={this._saveSettings}
           mockSize={this._isDemoMode() ? mockSize : undefined}

@@ -1,5 +1,5 @@
 # Smart Org Chart — User Guide
-**Version 1.3.1**
+**Version 1.4.0**
 
 Smart Org Chart is a SharePoint web part that gives your organization two complementary views of its people data: a searchable **Employee Directory** and an interactive **Org Chart**, both powered by Microsoft Graph.
 
@@ -20,7 +20,8 @@ Smart Org Chart is a SharePoint web part that gives your organization two comple
 8. [Admin Configuration](#8-admin-configuration)
    - [Custom Attributes](#custom-attributes)
 9. [Themes](#9-themes)
-10. [Tips](#10-tips)
+10. [Languages](#10-languages)
+11. [Tips](#11-tips)
 
 ---
 
@@ -64,11 +65,15 @@ Click any letter in the alphabet bar to filter the list to employees whose first
 
 Type in the search box above the alphabet bar to filter by name, job title, department, or email. Results update as you type and can be combined with the A–Z filter.
 
+### Department and office filters
+
+Dropdown filters for **Department** and **Office** appear in the toolbar whenever your organization has more than one distinct value for that field. Pick one to narrow the list; use **Clear** to reset every active filter (search, letter, department, and office) at once.
+
 ### Employee cards
 
 Each card shows the employee's profile photo (or their initials if no photo is available), name, job title, and any additional fields you have enabled in [User Preferences](#6-user-preferences): email address, phone number, department, and office location.
 
-If your admin has configured any [Custom Attributes](#custom-attributes), those appear as extra fields on the card too (e.g. Employee ID, City, Cost Center). If the person manages anyone, the card also shows how many people report to them, and the total headcount below them if that's larger than their direct-report count (e.g. "Manages 8 (33 total)").
+If your admin has configured any [Custom Attributes](#custom-attributes), those appear as extra fields on the card too (e.g. Employee ID, City, Cost Center).
 
 ![Close-up of an employee card with photo, name, title, email and department](screenshots/05-directory-card.png)
 
@@ -76,7 +81,7 @@ Click any card to open the [Person Profile Card](#5-person-profile-card).
 
 ### List view
 
-Toggle between the card grid and a compact list view using the view buttons above the alphabet bar. Any configured Custom Attributes appear as extra columns, and a "Reports" column shows headcount for anyone who manages people.
+Toggle between the card grid and a compact list view using the view buttons above the alphabet bar. Any configured Custom Attributes appear as extra columns.
 
 ![Employee Directory in list view showing a compact single-row layout per person](screenshots/17-directory-list.png)
 
@@ -264,6 +269,8 @@ Open the SharePoint property pane (**Edit** → click the web part → pencil ic
 |---|---|
 | **App Title** | Text shown in the header bar alongside the current view name (e.g. "Contoso"). |
 | **Logo URL** | Full URL to a PNG, SVG, or JPG logo file. Open the image in your browser and copy the address bar URL. SharePoint "Copy link" sharing URLs will not work. |
+| **Employee Directory View Label** | Overrides the "Employee Directory" name shown in the header bar and view-toggle tooltip. Leave blank to use the default name (or its localized equivalent — see [Languages](#10-languages)). Type `[blank]` to hide the label entirely instead — the header still shows its icon, and the view-toggle tooltip still names the view for accessibility. |
+| **Org Chart View Label** | Overrides the "Org Chart" name shown in the header bar and view-toggle tooltip. Leave blank to use the default name, or type `[blank]` to hide it entirely (same behavior as above). |
 
 ### Visual Style
 
@@ -276,6 +283,8 @@ Open the SharePoint property pane (**Edit** → click the web part → pencil ic
 When **Chart Theme** is set to **Custom**, an accent-color picker appears with:
 - A color swatch, a hex text field, and separate R/G/B number fields — all stay in sync with each other.
 - A live contrast check showing whether white text on your chosen color meets accessibility contrast guidelines. Text that would otherwise be hard to read (department badges, links, job titles) automatically uses a readable shade of your color instead of the raw color.
+
+Your chosen accent color applies throughout the web part — employee cards, the org chart, and the [header bar](#2-header-bar) itself, which switches from the default blue to your accent color (with automatically readable text) whenever the Custom theme is active.
 
 ### Data Source
 
@@ -380,7 +389,26 @@ The **Chart Theme** property controls the visual appearance of employee cards an
 
 ---
 
-## 10. Tips
+## 10. Languages
+
+Smart Org Chart's interface (labels, buttons, tooltips, error messages) is available in **30 languages**, listed below. Which one you see is decided automatically — it follows **your Microsoft 365 display-language setting** (or the SharePoint site's default language if you haven't set a personal preference). It does **not** depend on your computer's operating-system language: two people using the same English Windows PC will each see the web part in their own configured Microsoft 365 language. If your language isn't in the list below, the web part falls back to English.
+
+| Region | Languages |
+|---|---|
+| Western Europe | English, Spanish, French, German, Italian, Portuguese (Brazil & Portugal), Dutch |
+| Nordics | Swedish, Danish, Norwegian (Bokmål), Finnish |
+| Central / Eastern Europe | Polish, Czech, Hungarian, Romanian, Ukrainian, Russian, Greek |
+| East Asia | Chinese (Simplified & Traditional), Japanese, Korean |
+| Middle East / South Asia | Arabic, Hebrew, Turkish, Hindi |
+| Southeast Asia | Thai, Vietnamese, Indonesian |
+
+> Employee names, job titles, and departments always display exactly as stored in Microsoft 365 — the web part translates its own interface text only, not your organization's directory data.
+
+> Right-to-left mirroring for Arabic and Hebrew is not yet supported — the interface text is correctly translated, but the layout itself still reads left-to-right.
+
+---
+
+## 11. Tips
 
 - **Find someone fast:** Use the search box in the org chart toolbar — it searches across the entire organization, not just the loaded levels.
 - **Explore a sub-tree:** Use **View from person…** in the org chart toolbar to temporarily re-root the chart at any person. Great for exploring a specific department or team without changing the admin configuration.

@@ -20,6 +20,8 @@ import { ISmartOrgChartProps, OrgChartTheme } from './components/ISmartOrgChartP
 import { DEMO_CEO_EMAIL } from '../../services/MockGraphService';
 import { ICustomAttributeConfig, isValidCustomAttributeField } from '../../services/GraphService';
 import { DEFAULT_ACCENT, normalizeHex, hexToRgb, rgbToHex, contrastRatio, getContrastText, ensureReadable } from './components/colorUtils';
+import { formatString } from './components/localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 
 type ChangeCallback = ((targetProperty?: string, newValue?: any) => void) | undefined;
 
@@ -51,6 +53,8 @@ export interface ISmartOrgChartWebPartProps {
   // Branding
   companyName: string;
   logoUrl: string;
+  directoryLabel: string;
+  orgChartLabel: string;
   // Visual style (admin-controlled)
   theme: OrgChartTheme;
   accentColor: string;
@@ -102,6 +106,8 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     // Branding defaults
     if (p.companyName === undefined) p.companyName = '';
     if (p.logoUrl     === undefined) p.logoUrl     = '';
+    if (p.directoryLabel === undefined) p.directoryLabel = '';
+    if (p.orgChartLabel  === undefined) p.orgChartLabel  = '';
     // Data source default
     if (p.dataSource  === undefined) p.dataSource  = 'auto';
     if (p.dottedLineAttribute === undefined) p.dottedLineAttribute = '';
@@ -144,6 +150,8 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       useDemoData: this.properties.useDemoData || false,
       companyName: this.properties.companyName || '',
       logoUrl: this.properties.logoUrl || '',
+      directoryLabel: this.properties.directoryLabel || '',
+      orgChartLabel: this.properties.orgChartLabel || '',
       theme: this.properties.theme || 'modern',
       accentColor: this.properties.accentColor || '#0078d4',
       defaultLayout: this.properties.defaultLayout || 'drill',
@@ -204,7 +212,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     const storedHex = (): string => normalizeHex(this.properties.accentColor) || DEFAULT_ACCENT;
 
     const label = document.createElement('label');
-    label.textContent = 'Custom Accent Color';
+    label.textContent = strings.PropertyPane_AccentColor_Label;
     label.htmlFor = mainId;
     label.style.cssText = 'display:block;font-weight:600;font-size:14px;color:#323130;margin-bottom:8px;margin-top:4px;';
     elem.appendChild(label);
@@ -215,11 +223,11 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     const colorInput = document.createElement('input');
     colorInput.type = 'color';
     colorInput.id = this._fieldId('accent-swatch');
-    colorInput.setAttribute('aria-label', 'Accent color picker');
+    colorInput.setAttribute('aria-label', strings.PropertyPane_AccentColor_PickerAriaLabel);
     colorInput.style.cssText = 'width:40px;height:32px;border:1px solid #c8c6c4;border-radius:2px;padding:1px;cursor:pointer;';
 
     const hexLabel = document.createElement('span');
-    hexLabel.textContent = 'Hex';
+    hexLabel.textContent = strings.PropertyPane_AccentColor_HexLabel;
     hexLabel.setAttribute('aria-hidden', 'true');
     hexLabel.style.cssText = 'font-size:12px;color:#605e5c;font-weight:600;';
 
@@ -228,7 +236,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     hexInput.id = mainId;
     hexInput.maxLength = 9;
     hexInput.placeholder = DEFAULT_ACCENT;
-    hexInput.setAttribute('aria-label', 'Accent color hex value');
+    hexInput.setAttribute('aria-label', strings.PropertyPane_AccentColor_HexAriaLabel);
     hexInput.setAttribute('aria-describedby', `${errorId} ${contrastId}`);
     hexInput.spellcheck = false;
     hexInput.style.cssText = 'width:90px;padding:4px 8px;border:1px solid #c8c6c4;border-radius:2px;font-size:14px;font-family:monospace;letter-spacing:0.5px;';
@@ -248,7 +256,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     row2.style.cssText = 'display:flex;align-items:center;gap:6px;margin-bottom:4px;';
 
     const rgbSpan = document.createElement('span');
-    rgbSpan.textContent = 'RGB';
+    rgbSpan.textContent = strings.PropertyPane_AccentColor_RgbLabel;
     rgbSpan.setAttribute('aria-hidden', 'true');
     rgbSpan.style.cssText = 'font-size:12px;color:#605e5c;font-weight:600;min-width:28px;';
     row2.appendChild(rgbSpan);
@@ -261,7 +269,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       lbl.htmlFor = inp.id;
       lbl.style.cssText = 'font-size:12px;color:#605e5c;';
       inp.type = 'number'; inp.min = '0'; inp.max = '255';
-      inp.setAttribute('aria-label', `${name} channel (0 to 255)`);
+      inp.setAttribute('aria-label', formatString(strings.PropertyPane_AccentColor_ChannelAriaLabel, { name }));
       inp.style.cssText = 'width:52px;padding:3px 4px;border:1px solid #c8c6c4;border-radius:2px;font-size:13px;text-align:center;';
       row2.appendChild(lbl);
       row2.appendChild(inp);
@@ -297,14 +305,16 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       // Contrast is symmetric: white text on the accent and the accent as
       // text on white have the same ratio, so one figure covers both.
       const ratio = contrastRatio('#ffffff', hex);
-      const passes = ratio >= 4.5 ? 'passes AA' : ratio >= 3 ? 'large text only' : 'low contrast';
-      const notes: string[] = [`Contrast with white: ${ratio.toFixed(2)}:1 (${passes})`];
+      const passes = ratio >= 4.5 ? strings.PropertyPane_AccentColor_PassesAA
+        : ratio >= 3 ? strings.PropertyPane_AccentColor_LargeTextOnly
+        : strings.PropertyPane_AccentColor_LowContrast;
+      const notes: string[] = [formatString(strings.PropertyPane_AccentColor_ContrastWithWhite, { ratio: ratio.toFixed(2), passes })];
       if (getContrastText(hex) !== '#ffffff') {
-        notes.push('Text on this color will use dark text for readability.');
+        notes.push(strings.PropertyPane_AccentColor_DarkTextNote);
       }
       const readable = ensureReadable(hex);
       if (readable !== hex) {
-        notes.push(`Titles and links will use a darker shade (${readable}) for readability.`);
+        notes.push(formatString(strings.PropertyPane_AccentColor_DarkerShadeNote, { hex: readable }));
       }
       contrast.textContent = notes.join(' ');
     };
@@ -377,7 +387,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
         const typed = hexInput.value.trim();
         showValues(storedHex());
         if (typed) {
-          showError(`"${typed}" is not a valid hex color. Use a value like #0078d4 or #07d.`);
+          showError(formatString(strings.PropertyPane_AccentColor_InvalidHex, { typed }));
           reverted = true;
         } else {
           clearError();
@@ -420,7 +430,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     const stored = (): number => clamp(this.properties.pageSize || 50);
 
     const label = document.createElement('label');
-    label.textContent = 'Max employees per page';
+    label.textContent = strings.PropertyPane_PageSize_Label;
     label.htmlFor = sliderId;
     label.style.cssText = 'display:block;font-weight:600;font-size:14px;color:#323130;margin-bottom:8px;';
 
@@ -440,7 +450,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     numInput.id = this._fieldId('pagesize-number');
     numInput.min = '10';
     numInput.max = '200';
-    numInput.setAttribute('aria-label', 'Max employees per page (10 to 200)');
+    numInput.setAttribute('aria-label', strings.PropertyPane_PageSize_AriaLabel);
     numInput.style.cssText = 'width:64px;padding:4px 6px;border:1px solid #c8c6c4;border-radius:2px;font-size:14px;text-align:center;';
 
     let rafId = 0;
@@ -505,7 +515,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     }
 
     const heading = document.createElement('div');
-    heading.textContent = 'Manage custom attributes';
+    heading.textContent = strings.PropertyPane_CustomAttributes_Heading;
     heading.style.cssText = 'display:block;font-weight:600;font-size:14px;color:#323130;margin-bottom:8px;margin-top:4px;';
     elem.appendChild(heading);
 
@@ -514,13 +524,13 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     elem.appendChild(rowsContainer);
 
     const emptyMsg = document.createElement('div');
-    emptyMsg.textContent = 'No custom attributes configured.';
+    emptyMsg.textContent = strings.PropertyPane_CustomAttributes_Empty;
     emptyMsg.style.cssText = 'font-size:12px;color:#605e5c;font-style:italic;margin-bottom:8px;display:none;';
     elem.appendChild(emptyMsg);
 
     const addBtn = document.createElement('button');
     addBtn.type = 'button';
-    addBtn.textContent = '+ Add attribute';
+    addBtn.textContent = strings.PropertyPane_CustomAttributes_AddButton;
     addBtn.style.cssText = 'padding:6px 14px;border:1px solid #c8c6c4;border-radius:2px;background:#fff;cursor:pointer;font-size:13px;color:#323130;';
     elem.appendChild(addBtn);
 
@@ -536,7 +546,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       addBtn.disabled = atCap;
       addBtn.style.opacity = atCap ? '0.5' : '1';
       addBtn.style.cursor = atCap ? 'default' : 'pointer';
-      addBtn.title = atCap ? `Maximum of ${MAX_CUSTOM_ATTRIBUTES} custom attributes` : '';
+      addBtn.title = atCap ? formatString(strings.PropertyPane_CustomAttributes_MaxTooltip, { max: MAX_CUSTOM_ATTRIBUTES }) : '';
     };
 
     const applyRowValues = (refs: IRowRefs, cfg: ICustomAttributeConfig, skipFocused?: boolean): void => {
@@ -546,7 +556,7 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
         if (cfg.graphField && !isValidCustomAttributeField(cfg.graphField)) {
           refs.fieldInput.setAttribute('aria-invalid', 'true');
           refs.fieldInput.style.borderColor = '#a4262c';
-          refs.fieldError.textContent = 'Use employeeId, companyName, city, ... or extensionAttribute1-15';
+          refs.fieldError.textContent = strings.PropertyPane_CustomAttributes_FieldError;
           refs.fieldError.style.display = 'block';
         } else {
           refs.fieldInput.removeAttribute('aria-invalid');
@@ -593,14 +603,14 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       const fieldInputId = this._fieldId(`customattr-field-${cfg.id}`);
       const fieldLabel = document.createElement('label');
       fieldLabel.htmlFor = fieldInputId;
-      fieldLabel.textContent = 'Attribute name';
+      fieldLabel.textContent = strings.PropertyPane_CustomAttributes_FieldNameLabel;
       fieldLabel.style.cssText = 'display:block;font-size:11px;color:#605e5c;margin-bottom:2px;';
       const fieldInput = document.createElement('input');
       fieldInput.type = 'text';
       fieldInput.id = fieldInputId;
-      fieldInput.placeholder = 'e.g. companyName';
+      fieldInput.placeholder = strings.PropertyPane_CustomAttributes_FieldPlaceholder;
       fieldInput.spellcheck = false;
-      fieldInput.setAttribute('aria-label', 'Attribute name');
+      fieldInput.setAttribute('aria-label', strings.PropertyPane_CustomAttributes_FieldNameLabel);
       fieldInput.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #c8c6c4;border-radius:2px;font-size:13px;';
       fieldWrap.appendChild(fieldLabel);
       fieldWrap.appendChild(fieldInput);
@@ -614,13 +624,13 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       const labelInputId = this._fieldId(`customattr-label-${cfg.id}`);
       const labelLabel = document.createElement('label');
       labelLabel.htmlFor = labelInputId;
-      labelLabel.textContent = 'Display label';
+      labelLabel.textContent = strings.PropertyPane_CustomAttributes_DisplayLabelLabel;
       labelLabel.style.cssText = 'display:block;font-size:11px;color:#605e5c;margin-bottom:2px;';
       const labelInput = document.createElement('input');
       labelInput.type = 'text';
       labelInput.id = labelInputId;
-      labelInput.placeholder = 'e.g. Cost Center';
-      labelInput.setAttribute('aria-label', 'Display label');
+      labelInput.placeholder = strings.PropertyPane_CustomAttributes_LabelPlaceholder;
+      labelInput.setAttribute('aria-label', strings.PropertyPane_CustomAttributes_DisplayLabelLabel);
       labelInput.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #c8c6c4;border-radius:2px;font-size:13px;';
       labelWrap.appendChild(labelLabel);
       labelWrap.appendChild(labelInput);
@@ -628,8 +638,8 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       const removeBtn = document.createElement('button');
       removeBtn.type = 'button';
       removeBtn.textContent = '×';
-      removeBtn.title = 'Remove attribute';
-      removeBtn.setAttribute('aria-label', `Remove attribute ${ordinal + 1}`);
+      removeBtn.title = strings.PropertyPane_CustomAttributes_RemoveTitle;
+      removeBtn.setAttribute('aria-label', formatString(strings.PropertyPane_CustomAttributes_RemoveAriaLabel, { ordinal: ordinal + 1 }));
       removeBtn.style.cssText = 'flex-shrink:0;width:26px;height:26px;border:1px solid #c8c6c4;border-radius:2px;background:#fff;cursor:pointer;font-size:14px;line-height:1;color:#605e5c;margin-top:16px;';
 
       line1.appendChild(fieldWrap);
@@ -652,8 +662,8 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
         line2.appendChild(wrap);
         return cb;
       };
-      const dirCheckbox = makeCheckbox('Show in Directory', 'dir');
-      const chartCheckbox = makeCheckbox('Show in Org Chart', 'chart');
+      const dirCheckbox = makeCheckbox(strings.PropertyPane_CustomAttributes_ShowInDirectory, 'dir');
+      const chartCheckbox = makeCheckbox(strings.PropertyPane_CustomAttributes_ShowInOrgChart, 'chart');
 
       row.appendChild(line1);
       row.appendChild(line2);
@@ -752,46 +762,56 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     return {
       pages: [
         {
-          header: { description: 'Smart Org Chart Settings' },
+          header: { description: strings.PropertyPane_HeaderDescription },
           groups: [
             {
-              groupName: 'General',
+              groupName: strings.PropertyPane_Group_General,
               groupFields: [
                 PropertyPaneChoiceGroup('defaultView', {
-                  label: 'Default View',
+                  label: strings.PropertyPane_DefaultView_Label,
                   options: [
-                    { key: 'directory', text: 'Employee Directory', iconProps: { officeFabricIconFontName: 'People' } },
-                    { key: 'orgchart', text: 'Org Chart', iconProps: { officeFabricIconFontName: 'Org' } }
+                    { key: 'directory', text: strings.Header_DirectoryLabel, iconProps: { officeFabricIconFontName: 'People' } },
+                    { key: 'orgchart', text: strings.Header_OrgChartLabel, iconProps: { officeFabricIconFontName: 'Org' } }
                   ]
                 })
               ]
             },
             {
-              groupName: 'Branding',
+              groupName: strings.PropertyPane_Group_Branding,
               groupFields: [
                 PropertyPaneTextField('companyName', {
-                  label: 'App Title',
-                  placeholder: 'Contoso Org Chart',
-                  description: 'Displayed in the header bar alongside the view name'
+                  label: strings.PropertyPane_AppTitle_Label,
+                  placeholder: strings.PropertyPane_AppTitle_Placeholder,
+                  description: strings.PropertyPane_AppTitle_Description
                 }),
                 PropertyPaneTextField('logoUrl', {
-                  label: 'Logo URL',
-                  placeholder: 'https://contoso.sharepoint.com/sites/yoursite/SiteAssets/logo.png',
-                  description: 'Full URL to a PNG/SVG/JPG image. Tip: open the image file in your browser and copy the address bar URL. "Copy link" sharing URLs will not work.'
+                  label: strings.PropertyPane_LogoUrl_Label,
+                  placeholder: strings.PropertyPane_LogoUrl_Placeholder,
+                  description: strings.PropertyPane_LogoUrl_Description
+                }),
+                PropertyPaneTextField('directoryLabel', {
+                  label: strings.PropertyPane_DirectoryLabel_Label,
+                  placeholder: strings.Header_DirectoryLabel,
+                  description: strings.PropertyPane_ViewLabel_Description
+                }),
+                PropertyPaneTextField('orgChartLabel', {
+                  label: strings.PropertyPane_OrgChartLabel_Label,
+                  placeholder: strings.Header_OrgChartLabel,
+                  description: strings.PropertyPane_ViewLabel_Description
                 }),
               ]
             },
             {
-              groupName: 'Visual Style',
+              groupName: strings.PropertyPane_Group_VisualStyle,
               groupFields: [
                 PropertyPaneChoiceGroup('theme', {
-                  label: 'Chart Theme',
+                  label: strings.PropertyPane_ChartTheme_Label,
                   options: [
-                    { key: 'modern',    text: 'Modern — dept colors on white',  iconProps: { officeFabricIconFontName: 'Color' } },
-                    { key: 'minimal',   text: 'Minimal — flat & low contrast',  iconProps: { officeFabricIconFontName: 'CollapseMenu' } },
-                    { key: 'corporate', text: 'Corporate — unified blue',        iconProps: { officeFabricIconFontName: 'Work' } },
-                    { key: 'dark',      text: 'Dark — dark navy background',     iconProps: { officeFabricIconFontName: 'ClearNight' } },
-                    { key: 'custom',    text: 'Custom — pick your own color',    iconProps: { officeFabricIconFontName: 'Eyedropper' } },
+                    { key: 'modern',    text: strings.PropertyPane_Theme_Modern,    iconProps: { officeFabricIconFontName: 'Color' } },
+                    { key: 'minimal',   text: strings.PropertyPane_Theme_Minimal,   iconProps: { officeFabricIconFontName: 'CollapseMenu' } },
+                    { key: 'corporate', text: strings.PropertyPane_Theme_Corporate, iconProps: { officeFabricIconFontName: 'Work' } },
+                    { key: 'dark',      text: strings.PropertyPane_Theme_Dark,      iconProps: { officeFabricIconFontName: 'ClearNight' } },
+                    { key: 'custom',    text: strings.PropertyPane_Theme_Custom,    iconProps: { officeFabricIconFontName: 'Eyedropper' } },
                   ]
                 }),
                 ...( this.properties.theme === 'custom' ? [
@@ -808,61 +828,61 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
                   } as IPropertyPaneField<IPropertyPaneCustomFieldProps>)
                 ] : []),
                 PropertyPaneDropdown('defaultFontScale', {
-                  label: 'Default Font Size',
+                  label: strings.PropertyPane_DefaultFontSize_Label,
                   options: [
-                    { key: 0.75, text: '75% — Extra Small' },
-                    { key: 0.85, text: '85% — Small' },
-                    { key: 1,    text: '100% — Normal' },
-                    { key: 1.15, text: '115% — Large' },
-                    { key: 1.3,  text: '130% — Extra Large' },
-                    { key: 1.5,  text: '150% — XXL' },
-                    { key: 1.75, text: '175% — XXXL' },
+                    { key: 0.75, text: strings.PropertyPane_FontSize_75 },
+                    { key: 0.85, text: strings.PropertyPane_FontSize_85 },
+                    { key: 1,    text: strings.PropertyPane_FontSize_100 },
+                    { key: 1.15, text: strings.PropertyPane_FontSize_115 },
+                    { key: 1.3,  text: strings.PropertyPane_FontSize_130 },
+                    { key: 1.5,  text: strings.PropertyPane_FontSize_150 },
+                    { key: 1.75, text: strings.PropertyPane_FontSize_175 },
                   ],
                   selectedKey: this.properties.defaultFontScale || 1,
                 }),
                 PropertyPaneChoiceGroup('defaultLayout', {
-                  label: 'Default Org Chart Layout',
+                  label: strings.PropertyPane_DefaultLayout_Label,
                   options: [
-                    { key: 'drill',      text: 'Drill-Down',    iconProps: { officeFabricIconFontName: 'Org' } },
-                    { key: 'vertical',   text: 'Top Down',      iconProps: { officeFabricIconFontName: 'Down' } },
-                    { key: 'horizontal', text: 'Left to Right', iconProps: { officeFabricIconFontName: 'Forward' } },
+                    { key: 'drill',      text: strings.PropertyPane_Layout_Drill,      iconProps: { officeFabricIconFontName: 'Org' } },
+                    { key: 'vertical',   text: strings.PropertyPane_Layout_Vertical,   iconProps: { officeFabricIconFontName: 'Down' } },
+                    { key: 'horizontal', text: strings.PropertyPane_Layout_Horizontal, iconProps: { officeFabricIconFontName: 'Forward' } },
                   ]
                 }),
               ]
             },
             {
-              groupName: 'Data Source',
+              groupName: strings.PropertyPane_Group_DataSource,
               groupFields: [
                 PropertyPaneChoiceGroup('dataSource', {
-                  label: 'Where to load user & org data from',
+                  label: strings.PropertyPane_DataSource_Label,
                   options: [
                     {
                       key: 'auto',
-                      text: 'Auto — Graph API, fall back to SharePoint Search',
+                      text: strings.PropertyPane_DataSource_Auto,
                       iconProps: { officeFabricIconFontName: 'AutoEnhanceOn' }
                     },
                     {
                       key: 'graph',
-                      text: 'Graph API — live Azure AD data (no indexing delay)',
+                      text: strings.PropertyPane_DataSource_Graph,
                       iconProps: { officeFabricIconFontName: 'AzureLogo' }
                     },
                     {
                       key: 'search',
-                      text: 'SharePoint Search — legacy behavior',
+                      text: strings.PropertyPane_DataSource_Search,
                       iconProps: { officeFabricIconFontName: 'Search' }
                     }
                   ]
                 }),
                 PropertyPaneLabel('dataSource', {
-                  text: 'Graph API is recommended. It reads directly from Azure Active Directory so new users and manager changes appear immediately. Requires Microsoft Graph permissions to be approved in the SharePoint App Catalog.'
+                  text: strings.PropertyPane_DataSource_Note
                 })
               ]
             },
             {
-              groupName: 'Custom Attributes',
+              groupName: strings.PropertyPane_Group_CustomAttributes,
               groupFields: [
                 PropertyPaneLabel('customAttributes', {
-                  text: 'Custom attributes require Microsoft Graph (Data source: Graph or Auto). SharePoint Search has no generic way to read Entra ID attributes.'
+                  text: strings.PropertyPane_CustomAttributes_Note
                 }),
                 ({
                   type: PropertyPaneFieldType.Custom,
@@ -878,55 +898,55 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
               ]
             },
             {
-              groupName: 'User Filters',
+              groupName: strings.PropertyPane_Group_UserFilters,
               groupFields: [
                 PropertyPaneTextField('excludedAccounts', {
-                  label: 'Exclude accounts',
-                  placeholder: 'conf-room, noreply, admin@, Service Account',
-                  description: 'Comma-separated words or patterns (case-insensitive). Any user whose display name, email, or UPN contains one of these will be hidden from all views.',
+                  label: strings.PropertyPane_ExcludedAccounts_Label,
+                  placeholder: strings.PropertyPane_ExcludedAccounts_Placeholder,
+                  description: strings.PropertyPane_ExcludedAccounts_Description,
                   multiline: true,
                   rows: 3
                 }),
                 PropertyPaneToggle('restrictToTenantDomain', {
-                  label: 'Only show tenant users',
-                  onText: 'On — hides accounts with external email domains (e.g. gmail.com, hotmail.com)',
-                  offText: 'Off — all users shown regardless of email domain'
+                  label: strings.PropertyPane_RestrictTenant_Label,
+                  onText: strings.PropertyPane_RestrictTenant_On,
+                  offText: strings.PropertyPane_RestrictTenant_Off
                 }),
                 PropertyPaneToggle('hideGuestUsers', {
-                  label: 'Hide Azure AD guest accounts',
-                  onText: 'On — guest accounts hidden',
-                  offText: 'Off — guest accounts visible (shown with Guest badge)'
+                  label: strings.PropertyPane_HideGuest_Label,
+                  onText: strings.PropertyPane_HideGuest_On,
+                  offText: strings.PropertyPane_HideGuest_Off
                 }),
                 PropertyPaneToggle('hideDisabledAccounts', {
-                  label: 'Hide disabled accounts',
-                  onText: 'On — blocked sign-in accounts hidden',
-                  offText: 'Off — disabled accounts visible (shown with Disabled badge)'
+                  label: strings.PropertyPane_HideDisabled_Label,
+                  onText: strings.PropertyPane_HideDisabled_On,
+                  offText: strings.PropertyPane_HideDisabled_Off
                 }),
                 PropertyPaneLabel('hideDisabledAccounts', {
-                  text: 'Note: guest and disabled account detection requires the Graph API data source. SharePoint Search does not return this information, so these two filters (and the Guest/Disabled badges) have no effect when data comes from Search.'
+                  text: strings.PropertyPane_HideDisabled_Note
                 }),
                 PropertyPaneToggle('hideNoJobTitle', {
-                  label: 'Hide accounts without a job title',
-                  onText: 'On — accounts with no job title hidden',
-                  offText: 'Off — all accounts shown regardless of job title'
+                  label: strings.PropertyPane_HideNoJobTitle_Label,
+                  onText: strings.PropertyPane_HideNoJobTitle_On,
+                  offText: strings.PropertyPane_HideNoJobTitle_Off
                 }),
                 PropertyPaneToggle('hideNoDepartment', {
-                  label: 'Hide accounts without a department',
-                  onText: 'On — accounts with no department hidden',
-                  offText: 'Off — all accounts shown regardless of department'
+                  label: strings.PropertyPane_HideNoDept_Label,
+                  onText: strings.PropertyPane_HideNoDept_On,
+                  offText: strings.PropertyPane_HideNoDept_Off
                 }),
               ]
             },
             {
-              groupName: 'Org Chart',
+              groupName: strings.PropertyPane_Group_OrgChart,
               groupFields: [
                 PropertyPaneTextField('topLevelUser', {
-                  label: 'Top-Level User (UPN or Email)',
-                  placeholder: 'ceo@yourcompany.com',
-                  description: 'The person shown at the root of the org chart'
+                  label: strings.PropertyPane_TopLevelUser_Label,
+                  placeholder: strings.PropertyPane_TopLevelUser_Placeholder,
+                  description: strings.PropertyPane_TopLevelUser_Description
                 }),
                 PropertyPaneSlider('levelsBelow', {
-                  label: 'Levels to load below root',
+                  label: strings.PropertyPane_LevelsBelow_Label,
                   min: 1,
                   max: 8,
                   value: 3,
@@ -934,59 +954,59 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
                   step: 1
                 }),
                 PropertyPaneTextField('dottedLineAttribute', {
-                  label: 'Dotted-line manager attribute',
-                  placeholder: 'extensionAttribute10',
-                  description: 'Optional. Name of the Azure AD on-premises extension attribute (extensionAttribute1-15) that stores a secondary "dotted line" manager\'s email or UPN. Dotted-line relationships appear on profile cards. Requires the Graph API data source.'
+                  label: strings.PropertyPane_DottedLine_Label,
+                  placeholder: strings.PropertyPane_DottedLine_Placeholder,
+                  description: strings.PropertyPane_DottedLine_Description
                 }),
                 PropertyPaneDropdown('defaultZoom', {
-                  label: 'Default Org Chart Zoom',
+                  label: strings.PropertyPane_DefaultZoom_Label,
                   options: [
-                    { key: 0,    text: 'Default (Auto-fit)' },
-                    { key: 0.5,  text: '50%' },
-                    { key: 0.75, text: '75%' },
-                    { key: 1,    text: '100%' },
-                    { key: 1.25, text: '125%' },
-                    { key: 1.5,  text: '150%' },
+                    { key: 0,    text: strings.PropertyPane_Zoom_Auto },
+                    { key: 0.5,  text: strings.PropertyPane_Zoom_50 },
+                    { key: 0.75, text: strings.PropertyPane_Zoom_75 },
+                    { key: 1,    text: strings.PropertyPane_Zoom_100 },
+                    { key: 1.25, text: strings.PropertyPane_Zoom_125 },
+                    { key: 1.5,  text: strings.PropertyPane_Zoom_150 },
                   ],
                   selectedKey: this.properties.defaultZoom ?? 0,
                 })
               ]
             },
             {
-              groupName: 'Org Chart Features',
+              groupName: strings.PropertyPane_Group_OrgChartFeatures,
               groupFields: [
                 PropertyPaneLabel('enableFindMe', {
-                  text: 'Show or hide toolbar buttons in the org chart view.'
+                  text: strings.PropertyPane_FeatureToggles_Note
                 }),
                 PropertyPaneToggle('enableFindMe', {
-                  label: 'Find Me button',
-                  onText: 'Visible',
-                  offText: 'Hidden'
+                  label: strings.PropertyPane_FindMe_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
                 }),
                 PropertyPaneToggle('enableLayoutToggle', {
-                  label: 'Layout toggle (drill / vertical / horizontal)',
-                  onText: 'Visible',
-                  offText: 'Hidden'
+                  label: strings.PropertyPane_LayoutToggle_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
                 }),
                 PropertyPaneToggle('enableStats', {
-                  label: 'Org stats bar',
-                  onText: 'Visible',
-                  offText: 'Hidden'
+                  label: strings.PropertyPane_Stats_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
                 }),
                 PropertyPaneToggle('enableDeptFilter', {
-                  label: 'Department filter',
-                  onText: 'Visible',
-                  offText: 'Hidden'
+                  label: strings.PropertyPane_DeptFilter_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
                 }),
                 PropertyPaneToggle('enableUserFilter', {
-                  label: 'User type filter (members / guests)',
-                  onText: 'Visible',
-                  offText: 'Hidden'
+                  label: strings.PropertyPane_UserFilter_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
                 })
               ]
             },
             {
-              groupName: 'Directory',
+              groupName: strings.PropertyPane_Group_Directory,
               groupFields: [
                 ({
                   type: PropertyPaneFieldType.Custom,
@@ -1000,17 +1020,17 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
                   }
                 } as IPropertyPaneField<IPropertyPaneCustomFieldProps>),
                 PropertyPaneLabel('pageSize', {
-                  text: 'Card size, visible fields, and other display preferences are set per-user via the Settings gear in the app.'
+                  text: strings.PropertyPane_PageSize_Note
                 })
               ]
             },
             {
-              groupName: 'Demo',
+              groupName: strings.PropertyPane_Group_Demo,
               groupFields: [
                 PropertyPaneToggle('useDemoData', {
-                  label: 'Use Demo Data',
-                  onText: 'On — showing sample employees',
-                  offText: 'Off — live Microsoft 365 data',
+                  label: strings.PropertyPane_UseDemoData_Label,
+                  onText: strings.PropertyPane_UseDemoData_On,
+                  offText: strings.PropertyPane_UseDemoData_Off,
                   checked: false
                 }),
               ]

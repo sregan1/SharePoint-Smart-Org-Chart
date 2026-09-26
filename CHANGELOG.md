@@ -4,23 +4,28 @@ All notable changes to Smart Org Chart are documented here.
 
 ---
 
-## [1.3.1] — 2026-09-23
+## [1.4.0] — 2026-09-26
 
 ### Added
+- **Localization — 30 languages** — the entire interface (labels, buttons, tooltips, error messages, the property pane) is now translated into English, Spanish, French, German, Italian, Portuguese (Brazil & Portugal), Dutch, Swedish, Danish, Norwegian (Bokmål), Finnish, Polish, Czech, Hungarian, Romanian, Ukrainian, Russian, Greek, Chinese (Simplified & Traditional), Japanese, Korean, Arabic, Hebrew, Turkish, Hindi, Thai, Vietnamese, and Indonesian. The displayed language is picked up automatically from each signed-in user's Microsoft 365 display-language setting (or the site's default), the same mechanism SharePoint/Teams/Outlook use — it does not depend on the operating system's language. Any language without a translation falls back to English. Directory data (names, titles, departments) is unaffected — only the web part's own interface text is translated.
+- **Customizable view labels** — two new Branding fields, **Employee Directory View Label** and **Org Chart View Label**, let an admin rename either label shown in the header bar (and the view-toggle button's tooltip) instead of using the default (localized) names. Typing `[blank]` in either field hides that label entirely (the header still shows its icon, and the toggle tooltip still names the view for accessibility).
 - **Custom chart theme** — a fifth **Chart Theme** option, **Custom**, lets an admin pick any accent color for the Directory and Org Chart instead of choosing from the four built-in palettes. The property pane shows a color swatch, a hex input, and R/G/B number inputs, plus a live contrast check that warns when text would be hard to read on the chosen color; text drawn on or from the accent color automatically switches to a readable shade.
 - **Custom Attributes** — a new **Custom Attributes** group in the property pane lets an admin surface up to 10 additional Entra ID fields (e.g. `employeeId`, `companyName`, `city`, or `extensionAttribute1`–`15` for on-premises AD attributes like cost center or building) in the Employee Directory and/or the Org Chart's profile card, each with its own display label. Requires the Graph API data source — SharePoint Search has no generic way to read these fields.
-- **Total headcount** — in addition to the existing direct-report count, cards in the Org Chart, the profile popup, and Employee Directory rows now also show the total number of people below that person at every level (e.g. "8 direct reports · 33 total"), computed instantly with no extra loading.
+- **Total headcount** — in addition to the existing direct-report count, cards in the Org Chart and the profile popup now also show the total number of people below that person at every level (e.g. "8 direct reports · 33 total"), computed instantly with no extra loading.
 - **Refresh data button** — a new header-bar button manually reloads data from Microsoft Graph or SharePoint Search, bypassing the local cache (see below). Its tooltip shows when the data was last loaded.
 - **Local data caching** — downloaded user and org data is now cached locally for up to 4 hours (in addition to the existing in-memory cache), so reopening or reloading the page no longer re-downloads the whole directory every time. Admin filter changes (excluded accounts, hidden guests/disabled accounts, etc.) now re-apply to the cached data instantly instead of triggering a fresh download.
 - **Keyboard navigation in the org chart tree** — Arrow Up/Down/Left/Right and Home/End now move between cards in the Top Down and Left to Right layouts, with a visible focus ring; the search results dropdown supports Arrow Up/Down and Enter.
 
 ### Changed
-- **Employee Directory cards resize to fit their content** — a card with several optional fields enabled (custom attributes, the new headcount line, etc.) now grows to show everything instead of being clipped at a fixed height.
+- **Employee Directory cards resize to fit their content** — a card with several optional fields enabled (custom attributes, etc.) now grows to show everything instead of being clipped at a fixed height.
 - **Admin filter changes no longer re-download the whole directory** — changing a User Filter now re-applies it to already-loaded data in memory; only changing the data source, demo mode, the dotted-line attribute, or which custom attributes are configured triggers a fresh download (needed because those change what's actually requested from Graph).
 - **Default Font Size now applies live** — changing the admin's default text scale now updates immediately for any user who hasn't chosen their own font size in Preferences.
 - Large internal refactor of the Org Chart component for maintainability (split into focused modules) and performance (memoized rendering, debounced search, batched tree updates) — no user-facing behavior change beyond the fixes below.
 
 ### Fixed
+- **Custom theme didn't color the header bar** — picking the Custom chart theme and an accent color updated employee cards and the org chart, but the top header bar stayed the default SharePoint blue regardless of the chosen color. The header bar now uses the custom accent (with automatically computed readable text), matching every other themed surface.
+- **Top Down layout wasn't centered** — the vertical ("Top Down") tree layout could render flush against the left edge instead of centered under the viewport whenever the loaded tree was narrower than the available width (e.g. right after loading, before expanding further branches).
+- **Blurry, oversized "App Title" text in the header bar** — the company-name text next to the logo used a font weight (700) that several fonts render as synthetic/faux-bold, making it look blurry and wider than intended. It now matches the adjacent view-title weight (600) with proper font smoothing.
 - **Keyboard users couldn't expand org chart cards** — pressing Enter or Space on a card's Expand or Focus button opened the profile popup instead of activating that button.
 - **Large organizations loaded and rendered slowly** — Expand All and photo loading no longer lock up the page while working through a large tree; the SharePoint Search fallback path now batches its per-manager lookups instead of issuing one request per manager; a throttled Microsoft Graph request is now retried with backoff instead of silently falling back to a partial dataset.
 - **Two people configured as each other's manager could duplicate nodes** — this cycle is now detected and broken automatically instead of producing repeated cards or infinite loops.
@@ -31,6 +36,9 @@ All notable changes to Smart Org Chart are documented here.
 - Presence lookups that failed due to a missing permission were retried every 60 seconds instead of backing off.
 - The property pane's color picker and "max employees per page" slider could lose focus or stop responding while being dragged, because every change was rebuilding the field's inputs from scratch.
 - Various accessibility fixes: the org chart tree now exposes proper `tree`/`treeitem` roles, the profile popup traps focus and returns it to the card that opened it, and several controls that were invisible or unreachable by keyboard now have visible focus states.
+
+### Removed
+- **Headcount from the Employee Directory** — the "Manages N (M total)" line on directory cards and the "Reports" column in the list view have been removed. Headcount is still shown in the Org Chart (node cards, drill-down view, and the profile popup).
 
 ---
 

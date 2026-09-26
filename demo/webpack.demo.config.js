@@ -33,6 +33,11 @@ const spAliases = SP_PACKAGES.reduce((acc, pkg) => {
   return acc;
 }, {});
 
+// SPFx's real build resolves this module id via config.json's localizedResources
+// loc-loader, which doesn't exist in this standalone demo bundle — point it
+// straight at the English strings file instead.
+spAliases['SmartOrgChartWebPartStrings'] = path.resolve(ROOT, 'src/webparts/smartOrgChart/loc/en-us.js');
+
 module.exports = {
   mode:    'development',
   devtool: false,

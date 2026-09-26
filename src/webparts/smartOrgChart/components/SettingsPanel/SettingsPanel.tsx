@@ -8,6 +8,8 @@ import { Separator } from '@fluentui/react/lib/Separator';
 import { Label } from '@fluentui/react/lib/Label';
 import { IUserSettings } from '../ISmartOrgChartProps';
 import { ISettingsPanelProps } from './ISettingsPanelProps';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './SettingsPanel.module.scss';
 
 interface ISettingsPanelState {
@@ -15,24 +17,24 @@ interface ISettingsPanelState {
 }
 
 const alphabetOptions: IDropdownOption[] = [
-  { key: 'firstName', text: 'First Name' },
-  { key: 'lastName', text: 'Last Name' }
+  { key: 'firstName', text: strings.Settings_AlphabetFirstName },
+  { key: 'lastName', text: strings.Settings_AlphabetLastName }
 ];
 
 const cardSizeOptions: IDropdownOption[] = [
-  { key: 'small', text: 'Small — compact, more cards visible' },
-  { key: 'medium', text: 'Medium — balanced' },
-  { key: 'large', text: 'Large — spacious, fewer cards' }
+  { key: 'small', text: strings.Settings_CardSizeSmall },
+  { key: 'medium', text: strings.Settings_CardSizeMedium },
+  { key: 'large', text: strings.Settings_CardSizeLarge }
 ];
 
 const fontScaleOptions: IDropdownOption[] = [
-  { key: 0.75, text: '75% — Extra Small' },
-  { key: 0.85, text: '85% — Small' },
-  { key: 1,    text: '100% — Normal' },
-  { key: 1.15, text: '115% — Large' },
-  { key: 1.3,  text: '130% — Extra Large' },
-  { key: 1.5,  text: '150% — XXL' },
-  { key: 1.75, text: '175% — XXXL' },
+  { key: 0.75, text: strings.PropertyPane_FontSize_75 },
+  { key: 0.85, text: strings.PropertyPane_FontSize_85 },
+  { key: 1,    text: strings.PropertyPane_FontSize_100 },
+  { key: 1.15, text: strings.PropertyPane_FontSize_115 },
+  { key: 1.3,  text: strings.PropertyPane_FontSize_130 },
+  { key: 1.5,  text: strings.PropertyPane_FontSize_150 },
+  { key: 1.75, text: strings.PropertyPane_FontSize_175 },
 ];
 
 export class SettingsPanel extends React.Component<ISettingsPanelProps, ISettingsPanelState> {
@@ -60,7 +62,7 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
   }
 
   public render(): React.ReactElement {
-    const { isOpen, onDismiss, mockSize, onMockSizeChange } = this.props;
+    const { isOpen, onDismiss, mockSize, onMockSizeChange, locale } = this.props;
     const { draft } = this.state;
 
     return (
@@ -68,13 +70,13 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
         isOpen={isOpen}
         onDismiss={onDismiss}
         type={PanelType.medium}
-        headerText="Preferences"
+        headerText={strings.Settings_HeaderText}
         isFooterAtBottom
         onRenderFooterContent={() => (
           <div className={styles.footer}>
-            <PrimaryButton text="Save" onClick={this._save} />
-            <DefaultButton text="Cancel" onClick={onDismiss} style={{ marginLeft: 8 }} />
-            <DefaultButton text="Discard Changes" onClick={this._reset} style={{ marginLeft: 'auto' }} />
+            <PrimaryButton text={strings.Settings_SaveButton} onClick={this._save} />
+            <DefaultButton text={strings.Settings_CancelButton} onClick={onDismiss} style={{ marginLeft: 8 }} />
+            <DefaultButton text={strings.Settings_DiscardButton} onClick={this._reset} style={{ marginLeft: 'auto' }} />
           </div>
         )}
       >
@@ -82,18 +84,18 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
 
           {/* ── Directory display ── */}
           <Separator alignContent="start">
-            <span className={styles.sectionLabel}>Directory</span>
+            <span className={styles.sectionLabel}>{strings.Settings_SectionDirectory}</span>
           </Separator>
 
           <Dropdown
-            label="Alphabet Filter By"
+            label={strings.Settings_AlphabetFilterByLabel}
             selectedKey={draft.alphabetFilterField}
             options={alphabetOptions}
             onChange={(_, o) => o && this._update('alphabetFilterField', o.key as 'firstName' | 'lastName')}
           />
 
           <Dropdown
-            label="Card Size"
+            label={strings.Settings_CardSizeLabel}
             selectedKey={draft.cardSize}
             options={cardSizeOptions}
             onChange={(_, o) => o && this._update('cardSize', o.key as 'small' | 'medium' | 'large')}
@@ -101,7 +103,7 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
           />
 
           <Dropdown
-            label="Font Size"
+            label={strings.Settings_FontSizeLabel}
             selectedKey={draft.fontScale || 1}
             options={fontScaleOptions}
             onChange={(_, o) => o && this._update('fontScale', o.key as number)}
@@ -110,31 +112,31 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
 
           {/* ── Cards & Fields ── */}
           <Separator alignContent="start" className={styles.separator}>
-            <span className={styles.sectionLabel}>Cards &amp; Fields</span>
+            <span className={styles.sectionLabel}>{strings.Settings_SectionCardsAndFields}</span>
           </Separator>
 
           <div className={styles.toggleGroup}>
-            <Label>Show on employee cards:</Label>
+            <Label>{strings.Settings_ShowOnCardsLabel}</Label>
             <Toggle
-              label="Email address"
+              label={strings.Settings_EmailAddressLabel}
               checked={draft.showEmail}
               onChange={(_, v) => this._update('showEmail', !!v)}
               inlineLabel
             />
             <Toggle
-              label="Phone number"
+              label={strings.Settings_PhoneNumberLabel}
               checked={draft.showPhone}
               onChange={(_, v) => this._update('showPhone', !!v)}
               inlineLabel
             />
             <Toggle
-              label="Department"
+              label={strings.Settings_DepartmentLabel}
               checked={draft.showDepartment}
               onChange={(_, v) => this._update('showDepartment', !!v)}
               inlineLabel
             />
             <Toggle
-              label="Office location"
+              label={strings.Settings_OfficeLocationLabel}
               checked={draft.showOffice}
               onChange={(_, v) => this._update('showOffice', !!v)}
               inlineLabel
@@ -143,11 +145,11 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
 
           {/* ── Org Chart ── */}
           <Separator alignContent="start" className={styles.separator}>
-            <span className={styles.sectionLabel}>Org Chart</span>
+            <span className={styles.sectionLabel}>{strings.Settings_SectionOrgChart}</span>
           </Separator>
 
           <Slider
-            label={`Manager levels shown when focusing a person: ${draft.levelsAbove}`}
+            label={formatString(strings.Settings_ManagerLevelsLabel, { levels: draft.levelsAbove })}
             min={0}
             max={5}
             step={1}
@@ -158,27 +160,26 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
           />
 
           <Toggle
-            label="Compact cards"
+            label={strings.Settings_CompactCardsLabel}
             checked={draft.compactCards}
             onChange={(_, v) => this._update('compactCards', !!v)}
             inlineLabel
             className={styles.field}
-            onText="On — smaller cards, more visible at once"
-            offText="Off — standard size"
+            onText={strings.Settings_CompactCardsOn}
+            offText={strings.Settings_CompactCardsOff}
           />
 
           <div className={styles.hint}>
-            These preferences are saved to your browser and apply only to you.
-            Chart theme, default view, and layout are configured by your SharePoint admin.
+            {strings.Settings_Hint}
           </div>
 
           {/* ── Demo data ── */}
           {mockSize !== undefined && onMockSizeChange && (
             <>
               <Separator alignContent="start" className={styles.separator}>
-                <span className={styles.sectionLabel}>Demo Data</span>
+                <span className={styles.sectionLabel}>{strings.Settings_SectionDemoData}</span>
               </Separator>
-              <Label>Dataset size</Label>
+              <Label>{strings.Settings_DatasetSizeLabel}</Label>
               <div className={styles.mockSizeBtns}>
                 {([150, 500, 1000] as const).map(s => (
                   <button
@@ -186,7 +187,7 @@ export class SettingsPanel extends React.Component<ISettingsPanelProps, ISetting
                     className={`${styles.mockSizeBtn}${mockSize === s ? ` ${styles.mockSizeBtnActive}` : ''}`}
                     onClick={() => onMockSizeChange(s)}
                   >
-                    {s.toLocaleString()} people
+                    {formatString(strings.Settings_PeopleCountSuffix, { count: s.toLocaleString(locale) })}
                   </button>
                 ))}
               </div>

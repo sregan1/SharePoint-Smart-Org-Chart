@@ -1,4 +1,6 @@
 import { IGraphUser, IOrgNode } from './GraphService';
+import { formatString } from '../webparts/smartOrgChart/components/localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 
 /* ── Shared download / CSV helpers ── */
 
@@ -53,7 +55,7 @@ const BASE_STYLES = `
 
 function openPrintWindow(html: string): void {
   const win = window.open('', '_blank', 'width=900,height=700');
-  if (!win) { alert('Please allow pop-ups to export PDF.'); return; }
+  if (!win) { alert(strings.Chart_AllowPopupsForPdf); return; }
   win.document.write(html);
   win.document.close();
   win.focus();
@@ -68,13 +70,13 @@ export function exportDirectoryToExcel(users: IGraphUser[], opts: IDirectoryExpo
   if (users.length === 0) return;
 
   const cols: { label: string; get: (u: IGraphUser) => string }[] = [
-    { label: 'Name',      get: u => u.displayName || '' },
-    { label: 'Job Title', get: u => u.jobTitle || '' },
+    { label: strings.Export_ColumnName,     get: u => u.displayName || '' },
+    { label: strings.Export_ColumnJobTitle, get: u => u.jobTitle || '' },
   ];
-  if (opts.showDepartment) cols.push({ label: 'Department', get: u => u.department || '' });
-  if (opts.showOffice)     cols.push({ label: 'Office',     get: u => u.officeLocation || '' });
-  if (opts.showEmail)      cols.push({ label: 'Email',      get: u => u.mail || '' });
-  if (opts.showPhone)      cols.push({ label: 'Phone',      get: u => u.mobilePhone || (u.businessPhones && u.businessPhones[0]) || '' });
+  if (opts.showDepartment) cols.push({ label: strings.Export_ColumnDepartment, get: u => u.department || '' });
+  if (opts.showOffice)     cols.push({ label: strings.Export_ColumnOffice,     get: u => u.officeLocation || '' });
+  if (opts.showEmail)      cols.push({ label: strings.Export_ColumnEmail,      get: u => u.mail || '' });
+  if (opts.showPhone)      cols.push({ label: strings.Export_ColumnPhone,      get: u => u.mobilePhone || (u.businessPhones && u.businessPhones[0]) || '' });
 
   const lines = [
     csvRow(cols.map(c => c.label)),
@@ -90,7 +92,10 @@ export function exportDirectoryToExcel(users: IGraphUser[], opts: IDirectoryExpo
 
 export function exportOrgChartToCsv(rootNode: IOrgNode): void {
   const rows: string[] = [
-    csvRow(['Name', 'Job Title', 'Department', 'Office', 'Email', 'Phone', 'Manager', 'Level']),
+    csvRow([
+      strings.Export_ColumnName, strings.Export_ColumnJobTitle, strings.Export_ColumnDepartment, strings.Export_ColumnOffice,
+      strings.Export_ColumnEmail, strings.Export_ColumnPhone, strings.Export_ColumnManager, strings.Export_ColumnLevel,
+    ]),
   ];
   const visit = (n: IOrgNode, managerName: string, depth: number): void => {
     const u = n.user;
@@ -115,7 +120,7 @@ export function exportOrgChartToCsv(rootNode: IOrgNode): void {
   );
 }
 
-export function exportOrgChartToPdf(rootNode: IOrgNode, note?: string): void {
+export function exportOrgChartToPdf(rootNode: IOrgNode, note?: string, locale?: string): void {
   const lines: string[] = [];
 
   const renderNode = (node: IOrgNode, depth: number): void => {
@@ -143,10 +148,10 @@ export function exportOrgChartToPdf(rootNode: IOrgNode, note?: string): void {
 
   renderNode(rootNode, 0);
 
-  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>Org Chart</title>
+  const html = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${escHtml(strings.Export_PdfDocumentTitle)}</title>
 <style>${BASE_STYLES}</style></head><body>
-<h1>Organization Chart</h1>
-<div class="subtitle">Root: ${escHtml(rootNode.user.displayName)} &nbsp;·&nbsp; ${new Date().toLocaleDateString()}${note ? ` &nbsp;·&nbsp; ${escHtml(note)}` : ''}</div>
+<h1>${escHtml(strings.Export_PdfHeading)}</h1>
+<div class="subtitle">${escHtml(formatString(strings.Export_PdfRootLabel, { name: rootNode.user.displayName }))} &nbsp;·&nbsp; ${new Date().toLocaleDateString(locale)}${note ? ` &nbsp;·&nbsp; ${escHtml(note)}` : ''}</div>
 ${lines.join('')}
 </body></html>`;
 

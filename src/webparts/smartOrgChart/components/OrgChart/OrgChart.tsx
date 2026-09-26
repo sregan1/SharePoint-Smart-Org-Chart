@@ -23,6 +23,8 @@ import { OrgTree } from './OrgTree';
 import { DrillView } from './DrillView';
 import { NoConfigForm, UserFilterKey } from './ChartControls';
 import { OrgChartToolbar } from './OrgChartToolbar';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 
 export type { OrgChartTheme };
 
@@ -454,7 +456,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
           isExpanded: true, childrenLoaded: true, level: 0,
           totalReportCount: this.props.graphService?.getTotalReportCount(current.id) ?? 0,
         },
-        note: 'Current drill-down level (one level of direct reports)',
+        note: strings.Chart_ExportNote_DrillLevel,
       };
     }
 
@@ -462,14 +464,14 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     const filtered = filterTreeForExport(rootNode, isVisible);
     if (!filtered) return null;
     const note = getUnloadedFrontier(rootNode).length > 0
-      ? 'Includes loaded levels only — use Expand All before exporting to include deeper levels'
+      ? strings.Chart_ExportNote_PartialLevels
       : undefined;
     return { node: filtered, note };
   }
 
   public exportPdf(): void {
     const tree = this._getExportTree();
-    if (tree) exportOrgChartToPdf(tree.node, tree.note);
+    if (tree) exportOrgChartToPdf(tree.node, tree.note, this.props.locale);
   }
 
   private _exportCsv = (): void => {
@@ -622,17 +624,17 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
           // Clearing the setup choice lets Retry fall back to the setup form
           setupRootId: '',
           error: fromSetup
-            ? `User "${identifier}" not found.`
-            : `User "${identifier}" not found. Check the UPN or email in Settings.`,
+            ? formatString(strings.Chart_NotFoundFromSetup, { identifier })
+            : formatString(strings.Chart_NotFoundWithSettings, { identifier }),
         });
         return;
       }
       await this._applyRootUser(rootUser, allUsers, seq);
     } catch (err) {
-      const detail = err instanceof Error && err.message ? ` ${err.message}` : ' Check permissions.';
+      const detail = err instanceof Error && err.message ? ` ${err.message}` : strings.Chart_LoadFailedPermissions;
       this._restorePending = false;
       if (this._mounted && seq === this._navSeq) {
-        this.setState({ isLoading: false, isRefocusing: false, error: `Failed to load org chart.${detail}` });
+        this.setState({ isLoading: false, isRefocusing: false, error: formatString(strings.Chart_LoadFailedGeneric, { detail }) });
       }
     }
   }
@@ -651,7 +653,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     } catch {
       this._restorePending = false;
       if (this._mounted && seq === this._navSeq) {
-        this.setState({ isLoading: false, isRefocusing: false, error: 'Failed to load org chart for this person.' });
+        this.setState({ isLoading: false, isRefocusing: false, error: strings.Chart_LoadFailedForPerson });
       }
     }
   }
@@ -1144,7 +1146,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       this._checkFrontier(getUnloadedFrontier(expanded));
     } catch {
       if (this._mounted && seq === this._navSeq) {
-        this.setState({ isRefocusing: false, error: 'Failed to load org chart for this person.' });
+        this.setState({ isRefocusing: false, error: strings.Chart_LoadFailedForPerson });
       }
     }
   }
@@ -1212,7 +1214,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (user) {
       await this._handleFocusUser(user);
     } else if (this._mounted) {
-      this.setState({ findMeError: 'Your account was not found in this org.' });
+      this.setState({ findMeError: strings.Chart_FindMeNotFound });
       setTimeout(() => { if (this._mounted) this.setState({ findMeError: '' }); }, 3000);
     }
   }
@@ -1412,14 +1414,14 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       enableFindMe, enableLayoutToggle, enableStats, enableDeptFilter, enableUserFilter } = this.props;
 
     if (isLoading) return (
-      <div className={styles.centered}><Spinner size={SpinnerSize.large} label="Building org chart..." /></div>
+      <div className={styles.centered}><Spinner size={SpinnerSize.large} label={strings.Chart_BuildingLabel} /></div>
     );
 
     if (error) return (
       <div className={styles.errorState} role="alert">
         <Icon iconName="Warning" className={styles.errorIcon} />
         <div className={styles.errorText}>{error}</div>
-        <DefaultButton text="Retry" onClick={this._handleRetry} />
+        <DefaultButton text={strings.Chart_RetryButton} onClick={this._handleRetry} />
       </div>
     );
 
@@ -1539,18 +1541,18 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
         {/* ── Stats bar ── */}
         {stats && (
           <div className={styles.statsBar}>
-            <div className={styles.statItem}><span className={styles.statValue}>{stats.total}</span><span className={styles.statLabel}>People</span></div>
-            <div className={styles.statItem}><span className={styles.statValue}>{stats.members}</span><span className={styles.statLabel}>Members</span></div>
-            {stats.guests > 0 && <div className={styles.statItem}><span className={styles.statValue}>{stats.guests}</span><span className={styles.statLabel}>Guests</span></div>}
-            <div className={styles.statItem}><span className={styles.statValue}>{stats.depts}</span><span className={styles.statLabel}>Depts</span></div>
+            <div className={styles.statItem}><span className={styles.statValue}>{stats.total}</span><span className={styles.statLabel}>{strings.Chart_StatPeople}</span></div>
+            <div className={styles.statItem}><span className={styles.statValue}>{stats.members}</span><span className={styles.statLabel}>{strings.Chart_StatMembers}</span></div>
+            {stats.guests > 0 && <div className={styles.statItem}><span className={styles.statValue}>{stats.guests}</span><span className={styles.statLabel}>{strings.Chart_StatGuests}</span></div>}
+            <div className={styles.statItem}><span className={styles.statValue}>{stats.depts}</span><span className={styles.statLabel}>{strings.Chart_StatDepts}</span></div>
           </div>
         )}
 
         {/* ── Ancestor strip (full-tree mode only) ── */}
         {!isDrillMode && focusedUser && (
-          <nav className={styles.ancestorStrip} aria-label="Reporting line">
-            <button className={styles.ancestorReturnBtn} onClick={this._handleReturnToRoot} title="Back to full org chart">
-              <Icon iconName="Home" /> Full org
+          <nav className={styles.ancestorStrip} aria-label={strings.Chart_ReportingLineAria}>
+            <button className={styles.ancestorReturnBtn} onClick={this._handleReturnToRoot} title={strings.Chart_BackToFullOrgTitle}>
+              <Icon iconName="Home" /> {strings.Chart_FullOrgLabel}
             </button>
             <Icon iconName="ChevronRight" className={styles.ancestorChevron} />
             {ancestorChain.map(ancestor => (
@@ -1558,7 +1560,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
                 <button
                   className={styles.ancestorLink}
                   onClick={() => this._handleFocusUser(ancestor)}
-                  title={`Focus on ${ancestor.displayName}`}
+                  title={formatString(strings.Chart_FocusOnPerson, { name: ancestor.displayName })}
                 >
                   <span className={styles.ancestorInitials} style={{ background: t.accent, color: t.onAccent }}>
                     {getInitials(ancestor.displayName)}
@@ -1618,9 +1620,16 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
             aria-busy={isBusy}
           >
             <div
-              style={{ zoom: zoomLevel, display: 'inline-block', minWidth: '100%' }}
+              style={
+                chartLayout === 'horizontal'
+                  ? { zoom: zoomLevel, display: 'inline-block', minWidth: '100%' }
+                  // Vertical (top-down): the root's own box shrinks to fit its
+                  // subtree width, so without an explicit centering flex wrapper
+                  // it lands flush left instead of over the middle of its tree.
+                  : { zoom: zoomLevel, display: 'flex', justifyContent: 'center', minWidth: '100%' }
+              }
               role="tree"
-              aria-label="Org chart"
+              aria-label={strings.Chart_OrgChartAria}
               onKeyDown={this._handleTreeKeyDown}
             >
               <OrgTree

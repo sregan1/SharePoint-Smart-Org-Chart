@@ -12,5 +12,7 @@
     }
   },
   "externals": {},
-  "localizedResources": {}
+  "localizedResources": {
+    "SmartOrgChartWebPartStrings": "lib/webparts/smartOrgChart/loc/{locale}.js"
+  }
 }

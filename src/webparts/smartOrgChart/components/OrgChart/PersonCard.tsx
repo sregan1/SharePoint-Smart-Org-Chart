@@ -5,6 +5,8 @@ import { ICustomAttributeConfig, IGraphUser, PresenceAvailability } from '../../
 import { PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
 import { dedupeUsers } from './orgTreeUtils';
+import { formatString } from '../localeUtils';
+import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './OrgChart.module.scss';
 
 /* ── Person Card (Outlook-style popup) ───── */
@@ -67,14 +69,14 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
         onClick={e => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label={`Profile: ${user.displayName}`}
+        aria-label={formatString(strings.PersonCard_ProfileAria, { name: user.displayName })}
         firstFocusableTarget={`.${styles.personCardClose}`}
         isClickableOutsideFocusTrap={true}
         disableRestoreFocus={true}
       >
         {/* Colored header band */}
         <div className={styles.personCardHeader} style={{ background: t.accent }}>
-          <button className={styles.personCardClose} onClick={onClose} title="Close" aria-label="Close profile" style={onAccentStyle}>
+          <button className={styles.personCardClose} onClick={onClose} title={strings.PersonCard_CloseTitle} aria-label={strings.PersonCard_CloseAria} style={onAccentStyle}>
             <Icon iconName="Cancel" />
           </button>
           {photo
@@ -103,16 +105,16 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
                 {user.department}
               </span>
             )}
-            {isDisabled && <span className={styles.personCardStatusBadge} style={{ background: '#fde7e9', color: '#c50f1f' }}>Disabled</span>}
-            {isGuest   && <span className={styles.personCardStatusBadge} style={{ background: '#fff4ce', color: '#835c00' }}>Guest</span>}
+            {isDisabled && <span className={styles.personCardStatusBadge} style={{ background: '#fde7e9', color: '#c50f1f' }}>{strings.PersonCard_StatusDisabled}</span>}
+            {isGuest   && <span className={styles.personCardStatusBadge} style={{ background: '#fff4ce', color: '#835c00' }}>{strings.PersonCard_StatusGuest}</span>}
           </div>
 
           {/* Direct + total headcount */}
           {directReportCount > 0 && (
             <div className={styles.personCardReportsLine} style={{ color: t.subText }}>
               <Icon iconName="Group" />
-              {directReportCount} direct report{directReportCount === 1 ? '' : 's'}
-              {totalReportCount > directReportCount && ` · ${totalReportCount} total`}
+              {formatString(directReportCount === 1 ? strings.PersonCard_DirectReportSingular : strings.PersonCard_DirectReportPlural, { count: directReportCount })}
+              {totalReportCount > directReportCount && formatString(strings.PersonCard_TotalSuffix, { total: totalReportCount })}
             </div>
           )}
 
@@ -124,8 +126,8 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
                 <a href={`mailto:${user.mail}`} className={styles.personCardFieldLink} style={{ color: t.accentText }}>{user.mail}</a>
                 <button
                   onClick={() => copy(user.mail, 'email')}
-                  title="Copy email address"
-                  aria-label={copied === 'email' ? 'Email address copied' : 'Copy email address'}
+                  title={strings.PersonCard_CopyEmailTitle}
+                  aria-label={copied === 'email' ? strings.PersonCard_EmailCopiedAria : strings.PersonCard_CopyEmailTitle}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', color: t.subText, padding: '2px 4px' }}
                 >
                   <Icon iconName={copied === 'email' ? 'CheckMark' : 'Copy'} />
@@ -165,7 +167,7 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
           {/* Reporting chain */}
           {chain.length > 0 && (
             <div className={styles.personCardChain} style={{ background: t.chainBg, borderColor: t.border }}>
-              <div className={styles.personCardChainLabel} style={{ color: t.subText }}>Reports to</div>
+              <div className={styles.personCardChainLabel} style={{ color: t.subText }}>{strings.PersonCard_ReportsTo}</div>
               <div className={styles.personCardChainItems}>
                 {chain.map((mgr, i) => (
                   <React.Fragment key={mgr.id}>
@@ -173,8 +175,8 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
                     <button
                       className={styles.personCardChainChip}
                       onClick={() => { onClose(); onFocus(mgr); }}
-                      title={`Focus on ${mgr.displayName}`}
-                      aria-label={`Focus org chart on ${mgr.displayName}`}
+                      title={formatString(strings.PersonCard_FocusOnPerson, { name: mgr.displayName })}
+                      aria-label={formatString(strings.PersonCard_FocusOrgChartOnPerson, { name: mgr.displayName })}
                     >
                       <span className={styles.personCardChainInitials} style={{ background: t.accent, color: t.onAccent }}>
                         {getInitials(mgr.displayName)}
@@ -192,13 +194,13 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
           {/* Dotted-line relationships */}
           {(dottedManager || reports.length > 0) && (
             <div className={styles.personCardChain} style={{ background: t.chainBg, borderColor: t.border }}>
-              <div className={styles.personCardChainLabel} style={{ color: t.subText }}>Dotted line</div>
+              <div className={styles.personCardChainLabel} style={{ color: t.subText }}>{strings.PersonCard_DottedLine}</div>
               <div className={styles.personCardChainItems}>
                 {dottedManager && (
                   <button
                     className={styles.personCardChainChip}
                     onClick={() => { onClose(); onFocus(dottedManager); }}
-                    title={`Dotted-line manager: ${dottedManager.displayName}`}
+                    title={formatString(strings.PersonCard_DottedLineManager, { name: dottedManager.displayName })}
                   >
                     <span className={styles.personCardChainInitials} style={{ background: t.accent, color: t.onAccent }}>
                       {getInitials(dottedManager.displayName)}
@@ -213,7 +215,7 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
                     key={rep.id}
                     className={styles.personCardChainChip}
                     onClick={() => { onClose(); onFocus(rep); }}
-                    title={`Dotted-line report: ${rep.displayName}`}
+                    title={formatString(strings.PersonCard_DottedLineReport, { name: rep.displayName })}
                   >
                     <span className={styles.personCardChainInitials} style={{ background: t.accent, color: t.onAccent }}>
                       {getInitials(rep.displayName)}
@@ -236,22 +238,22 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
                 className={styles.personCardAction}
                 style={{ background: t.accent, color: t.onAccent }}
               >
-                <Icon iconName="Chat" />&nbsp;Chat
+                <Icon iconName="Chat" />&nbsp;{strings.PersonCard_ChatButton}
               </a>
               <a
                 href={`mailto:${user.mail}`}
                 className={styles.personCardAction}
                 style={{ background: t.neutralBtnBg, color: t.neutralBtnText }}
               >
-                <Icon iconName="Mail" />&nbsp;Email
+                <Icon iconName="Mail" />&nbsp;{strings.PersonCard_EmailButton}
               </a>
               <button
                 className={styles.personCardAction}
                 style={{ background: t.neutralBtnBg, color: t.neutralBtnText, border: 'none', cursor: 'pointer' }}
                 onClick={() => { onClose(); onFocus(user); }}
-                title="Focus org chart on this person"
+                title={strings.PersonCard_FocusTitle}
               >
-                <Icon iconName="Org" />&nbsp;Focus
+                <Icon iconName="Org" />&nbsp;{strings.PersonCard_FocusButton}
               </button>
             </div>
           )}
