@@ -4,6 +4,16 @@ All notable changes to Smart Org Chart are documented here.
 
 ---
 
+## [1.4.1] — 2026-10-05
+
+### Added
+- **Full-width section support** — the web part can now be placed in a SharePoint full-width section, so the Employee Directory and Org Chart can use the entire width of the page.
+
+### Fixed
+- **Employee Directory list view was cut off on the right** — when the list's columns (especially with email, phone, or custom attributes enabled) were wider than the section the web part sits in, the right-hand columns were clipped with no way to reach them. The list now scrolls horizontally within the web part.
+
+---
+
 ## [1.4.0] — 2026-09-26
 
 ### Added

@@ -1,23 +1,26 @@
-name: Build and Release
+name: Release
 
+# Fires on the tag push itself, so `git push origin vX.Y.Z` is the whole release
+# process — no manual "create release" step to forget.
 on:
   push:
-    branches:
-      - main
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: write
 
 jobs:
-  release:
+  build-and-release:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out repository
+        uses: actions/checkout@v4
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '18.17.1'
           cache: 'npm'
 
       - name: Install dependencies
@@ -26,33 +29,36 @@ jobs:
       - name: Build .sppkg
         run: npm run package
 
-      - name: Get solution version
-        id: version
+      - name: Extract this version's CHANGELOG section
+        id: notes
         run: |
-          VERSION=$(node -p "require('./config/package-solution.json').solution.version")
-          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v hdr="## [$VERSION]" '
+            index($0, hdr) == 1      { found = 1; next }
+            found && index($0, "## [") == 1 { exit }
+            found                    { print }
+          ' CHANGELOG.md > changelog-section.md
+          sed -i -e 's/^---$//' changelog-section.md
+          if [ ! -s changelog-section.md ] || ! grep -q '[^[:space:]]' changelog-section.md; then
+            echo "No CHANGELOG.md section found for [$VERSION]" >&2
+            exit 1
+          fi
 
-      - name: Delete existing release (if version already exists)
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build release notes
         run: |
-          gh release delete "${{ steps.version.outputs.tag }}" --yes 2>/dev/null || true
-          git push origin --delete "${{ steps.version.outputs.tag }}" 2>/dev/null || true
+          {
+            echo "## Installation"
+            echo ""
+            echo "1. Download \`smart-org-chart.sppkg\`"
+            echo "2. Upload to your SharePoint App Catalog"
+            echo "3. Deploy tenant-wide or to specific sites"
+            echo "4. Grant the required Microsoft Graph API permissions in the SharePoint Admin Center"
+            echo ""
+          } > release-notes.md
+          cat changelog-section.md >> release-notes.md
 
-      - name: Create release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          gh release create "${{ steps.version.outputs.tag }}" \
-            sharepoint/solution/smart-org-chart.sppkg \
-            --title "Smart Org Chart ${{ steps.version.outputs.tag }}" \
-            --notes "## Installation
-
-          1. Download \`smart-org-chart.sppkg\`
-          2. Upload to your SharePoint App Catalog
-          3. Deploy tenant-wide or to specific sites
-          4. Grant the required Microsoft Graph API permissions in the SharePoint Admin Center
-
-          **Built from:** \`${{ github.sha }}\`" \
-            --latest
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sharepoint/solution/smart-org-chart.sppkg
+          body_path: release-notes.md

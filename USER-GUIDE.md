@@ -1,5 +1,5 @@
 # Smart Org Chart — User Guide
-**Version 1.4.0**
+**Version 1.4.1**
 
 Smart Org Chart is a SharePoint web part that gives your organization two complementary views of its people data: a searchable **Employee Directory** and an interactive **Org Chart**, both powered by Microsoft Graph.
 
@@ -81,7 +81,7 @@ Click any card to open the [Person Profile Card](#5-person-profile-card).
 
 ### List view
 
-Toggle between the card grid and a compact list view using the view buttons above the alphabet bar. Any configured Custom Attributes appear as extra columns.
+Toggle between the card grid and a compact list view using the view buttons above the alphabet bar. Any configured Custom Attributes appear as extra columns. If the list is wider than the space available on the page, scroll sideways within the list to see the remaining columns. For the most room, ask the page owner to place the web part in a full-width section.
 
 ![Employee Directory in list view showing a compact single-row layout per person](screenshots/17-directory-list.png)
 

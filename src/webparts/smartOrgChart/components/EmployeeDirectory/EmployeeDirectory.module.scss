@@ -310,6 +310,14 @@
 
 /* ── List view ───────────────────────────── */
 
+// Lets a wide table (many columns / custom attributes) scroll horizontally
+// inside the web part instead of being clipped at the right edge.
+.listScroll {
+  overflow-x: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .listTable {
   width: 100%;
   border-collapse: collapse;

@@ -527,6 +527,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
     const dirAttrs = this._getDirectoryAttributes();
 
     return (
+      <div className={styles.listScroll}>
       <table className={styles.listTable}>
         <thead>
           <tr className={styles.listHead}>
@@ -606,6 +607,7 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
           })}
         </tbody>
       </table>
+      </div>
     );
   }
 
