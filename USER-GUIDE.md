@@ -19,6 +19,7 @@ Smart Org Chart is a SharePoint web part that gives your organization two comple
 7. [Exporting](#7-exporting)
 8. [Admin Configuration](#8-admin-configuration)
    - [Custom Attributes](#custom-attributes)
+   - [External People](#external-people)
 9. [Themes](#9-themes)
 10. [Languages](#10-languages)
 11. [Tips](#11-tips)
@@ -314,6 +315,20 @@ For each attribute (up to 10), configure:
 | **Show in Org Chart** | Adds the attribute as a field on the person profile card. |
 
 Use **+ Add attribute** to add a row and the **×** button to remove one. A value is only shown for a person if that field actually has data in Azure AD — empty values are hidden rather than shown blank.
+
+### External People
+
+Show people who aren't in your Microsoft 365 directory — contractors, partners, open positions — alongside everyone else. There is no limit on how many you add. For each person, configure:
+
+| Field | Description |
+|---|---|
+| **Name** | Shown on their card. A row without a name is ignored. |
+| **Job title** | Shown under the name. Optional. |
+| **Reports to (manager email)** | Email address (or UPN) of an existing directory user. The person is placed in the org chart directly under that manager. An address that isn't a valid email shows an inline error. |
+
+Use **+ Add person** to add a row and the **×** button to remove one. Changes apply immediately — no reload, and no re-download of the directory.
+
+External people appear in the Org Chart (all three layouts), the Employee Directory, search, headcounts, and exports, marked with an **External** badge — turn off **Show "External" badge** to show them like everyone else. They have no photo (initials are shown), no presence, and no Chat/Email actions. The admin [User Filters](#user-filters) don't hide them, but if their manager is hidden by a filter they move up to the next visible manager, just like a directory user would. If the manager email doesn't match anyone in the directory, the person still appears in the Directory and in search, but not in the org chart tree.
 
 ### User Filters
 

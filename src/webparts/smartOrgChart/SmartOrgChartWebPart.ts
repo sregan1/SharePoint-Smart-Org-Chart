@@ -18,7 +18,7 @@ import {
 import { SmartOrgChart } from './components/SmartOrgChart';
 import { ISmartOrgChartProps, OrgChartTheme } from './components/ISmartOrgChartProps';
 import { DEMO_CEO_EMAIL } from '../../services/MockGraphService';
-import { ICustomAttributeConfig, isValidCustomAttributeField } from '../../services/GraphService';
+import { ICustomAttributeConfig, IExternalPersonConfig, isValidCustomAttributeField } from '../../services/GraphService';
 import { DEFAULT_ACCENT, normalizeHex, hexToRgb, rgbToHex, contrastRatio, getContrastText, ensureReadable } from './components/colorUtils';
 import { formatString } from './components/localeUtils';
 import * as strings from 'SmartOrgChartWebPartStrings';
@@ -73,6 +73,9 @@ export interface ISmartOrgChartWebPartProps {
   // Admin-configured Entra ID attributes to surface in the Directory / Org Chart.
   // Graph only — SharePoint Search has no generic way to read them.
   customAttributes: ICustomAttributeConfig[];
+  // Admin-added people who are not in the Microsoft 365 directory
+  externalPeople: IExternalPersonConfig[];
+  showExternalBadge: boolean;
   // User filters
   excludedAccounts: string;
   restrictToTenantDomain: boolean;
@@ -112,6 +115,8 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     if (p.dataSource  === undefined) p.dataSource  = 'auto';
     if (p.dottedLineAttribute === undefined) p.dottedLineAttribute = '';
     if (p.customAttributes    === undefined) p.customAttributes    = [];
+    if (p.externalPeople      === undefined) p.externalPeople      = [];
+    if (p.showExternalBadge   === undefined) p.showExternalBadge   = true;
     // User filter defaults
     if (p.excludedAccounts       === undefined) p.excludedAccounts       = '';
     if (p.restrictToTenantDomain === undefined) p.restrictToTenantDomain = false;
@@ -165,7 +170,9 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
       dataSource: this.properties.dataSource || 'auto',
       dottedLineAttribute: this.properties.dottedLineAttribute || '',
       customAttributes: this.properties.customAttributes || [],
-      excludedAccounts:       this.properties.excludedAccounts       || '',
+      externalPeople: this.properties.externalPeople || [],
+      showExternalBadge: this.properties.showExternalBadge !== false,
+      excludedAccounts:      this.properties.excludedAccounts       || '',
       restrictToTenantDomain: this.properties.restrictToTenantDomain || false,
       hideGuestUsers:         this.properties.hideGuestUsers         ?? true,
       hideDisabledAccounts:   this.properties.hideDisabledAccounts   ?? true,
@@ -796,6 +803,188 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     this._customFields.set(elem, handle);
   }
 
+  private _renderExternalPeopleField(elem: HTMLElement, changeCallback: ChangeCallback): void {
+    if (this._resyncCustomField(elem, changeCallback)) return;
+    elem.innerHTML = '';
+
+    type TextKey = 'name' | 'jobTitle' | 'managerEmail';
+    interface IRowRefs {
+      row: HTMLElement;
+      inputs: { [K in TextKey]: HTMLInputElement };
+      managerError: HTMLDivElement;
+    }
+
+    const heading = document.createElement('div');
+    heading.textContent = strings.PropertyPane_ExternalPeople_Heading;
+    heading.style.cssText = 'display:block;font-weight:600;font-size:14px;color:#323130;margin-bottom:8px;margin-top:4px;';
+    elem.appendChild(heading);
+
+    const rowsContainer = document.createElement('div');
+    rowsContainer.style.cssText = 'display:flex;flex-direction:column;gap:8px;margin-bottom:8px;';
+    elem.appendChild(rowsContainer);
+
+    const emptyMsg = document.createElement('div');
+    emptyMsg.textContent = strings.PropertyPane_ExternalPeople_Empty;
+    emptyMsg.style.cssText = 'font-size:12px;color:#605e5c;font-style:italic;margin-bottom:8px;display:none;';
+    elem.appendChild(emptyMsg);
+
+    const addBtn = document.createElement('button');
+    addBtn.type = 'button';
+    addBtn.textContent = strings.PropertyPane_ExternalPeople_AddButton;
+    addBtn.style.cssText = 'padding:6px 14px;border:1px solid #c8c6c4;border-radius:2px;background:#fff;cursor:pointer;font-size:13px;color:#323130;';
+    elem.appendChild(addBtn);
+
+    const rowRefs: Map<string, IRowRefs> = new Map();
+    const getList = (): IExternalPersonConfig[] => (this.properties.externalPeople || []).slice();
+    const findIndex = (list: IExternalPersonConfig[], id: string): number => list.findIndex(c => c.id === id);
+    const looksLikeEmail = (v: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+
+    const updateEmptyState = (): void => {
+      emptyMsg.style.display = rowsContainer.children.length === 0 ? 'block' : 'none';
+    };
+
+    const showManagerValidity = (refs: IRowRefs, value: string): void => {
+      const invalid = !!value && !looksLikeEmail(value);
+      if (invalid) {
+        refs.inputs.managerEmail.setAttribute('aria-invalid', 'true');
+        refs.inputs.managerEmail.style.borderColor = '#a4262c';
+        refs.managerError.textContent = strings.PropertyPane_ExternalPeople_ManagerError;
+        refs.managerError.style.display = 'block';
+      } else {
+        refs.inputs.managerEmail.removeAttribute('aria-invalid');
+        refs.inputs.managerEmail.style.borderColor = '#c8c6c4';
+        refs.managerError.textContent = '';
+        refs.managerError.style.display = 'none';
+      }
+    };
+
+    const applyRowValues = (refs: IRowRefs, cfg: IExternalPersonConfig, skipFocused?: boolean): void => {
+      const active = document.activeElement;
+      (['name', 'jobTitle', 'managerEmail'] as TextKey[]).forEach(key => {
+        if (skipFocused && active === refs.inputs[key]) return;
+        refs.inputs[key].value = cfg[key] || '';
+        if (key === 'managerEmail') showManagerValidity(refs, refs.inputs[key].value.trim());
+      });
+    };
+
+    const handle: ICustomFieldHandle = {
+      changeCallback,
+      sync: () => {
+        const list = getList();
+        rowRefs.forEach((refs, id) => {
+          const cfg = list[findIndex(list, id)];
+          if (cfg) applyRowValues(refs, cfg, true);
+        });
+        updateEmptyState();
+      },
+      dispose: () => { /* no timers/rAF to clean up */ },
+    };
+
+    const commit = (list: IExternalPersonConfig[]): void => {
+      if (handle.changeCallback) handle.changeCallback('externalPeople', list);
+    };
+
+    const buildRow = (cfg: IExternalPersonConfig, ordinal: number): IRowRefs => {
+      const row = document.createElement('div');
+      row.style.cssText = 'border:1px solid #edebe9;border-radius:4px;padding:8px;display:flex;flex-direction:column;gap:6px;';
+
+      const makeInput = (key: TextKey, labelText: string, placeholder: string, parent: HTMLElement): HTMLInputElement => {
+        const wrap = document.createElement('div');
+        wrap.style.cssText = 'flex:1;min-width:0;';
+        const input = document.createElement('input');
+        input.type = key === 'managerEmail' ? 'email' : 'text';
+        input.id = this._fieldId(`external-${key}-${cfg.id}`);
+        input.placeholder = placeholder;
+        input.spellcheck = key !== 'managerEmail';
+        input.style.cssText = 'width:100%;box-sizing:border-box;padding:4px 6px;border:1px solid #c8c6c4;border-radius:2px;font-size:13px;';
+        const label = document.createElement('label');
+        label.htmlFor = input.id;
+        label.textContent = labelText;
+        label.style.cssText = 'display:block;font-size:11px;color:#605e5c;margin-bottom:2px;';
+        wrap.appendChild(label);
+        wrap.appendChild(input);
+        parent.appendChild(wrap);
+        return input;
+      };
+
+      const line1 = document.createElement('div');
+      line1.style.cssText = 'display:flex;align-items:flex-start;gap:6px;';
+      const nameInput = makeInput('name', strings.PropertyPane_ExternalPeople_NameLabel, strings.PropertyPane_ExternalPeople_NamePlaceholder, line1);
+
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.textContent = '×';
+      removeBtn.title = strings.PropertyPane_ExternalPeople_RemoveTitle;
+      removeBtn.setAttribute('aria-label', formatString(strings.PropertyPane_ExternalPeople_RemoveAriaLabel, { ordinal: ordinal + 1 }));
+      removeBtn.style.cssText = 'flex-shrink:0;width:26px;height:26px;border:1px solid #c8c6c4;border-radius:2px;background:#fff;cursor:pointer;font-size:14px;line-height:1;color:#605e5c;margin-top:16px;';
+      line1.appendChild(removeBtn);
+
+      row.appendChild(line1);
+      const titleInput = makeInput('jobTitle', strings.PropertyPane_ExternalPeople_TitleLabel, strings.PropertyPane_ExternalPeople_TitlePlaceholder, row);
+      const managerInput = makeInput('managerEmail', strings.PropertyPane_ExternalPeople_ManagerLabel, strings.PropertyPane_ExternalPeople_ManagerPlaceholder, row);
+      const managerError = document.createElement('div');
+      managerError.id = this._fieldId(`external-managerError-${cfg.id}`);
+      managerError.setAttribute('role', 'alert');
+      managerError.style.cssText = 'font-size:11px;color:#a4262c;margin-top:-4px;display:none;';
+      managerInput.setAttribute('aria-describedby', managerError.id);
+      row.appendChild(managerError);
+
+      const refs: IRowRefs = { row, inputs: { name: nameInput, jobTitle: titleInput, managerEmail: managerInput }, managerError };
+
+      (['name', 'jobTitle', 'managerEmail'] as TextKey[]).forEach(key => {
+        const input = refs.inputs[key];
+        const commitChange = (): void => {
+          const value = key === 'managerEmail' ? input.value.trim() : input.value;
+          if (key === 'managerEmail') showManagerValidity(refs, value);
+          const list = getList();
+          const idx = findIndex(list, cfg.id);
+          if (idx < 0 || list[idx][key] === value) return;
+          list[idx] = { ...list[idx], [key]: value };
+          commit(list);
+        };
+        input.addEventListener('change', commitChange);
+        input.addEventListener('blur', commitChange);
+      });
+
+      removeBtn.addEventListener('click', () => {
+        const list = getList().filter(c => c.id !== cfg.id);
+        rowRefs.delete(cfg.id);
+        row.remove();
+        commit(list);
+        updateEmptyState();
+      });
+
+      return refs;
+    };
+
+    getList().forEach((cfg, idx) => {
+      const refs = buildRow(cfg, idx);
+      rowRefs.set(cfg.id, refs);
+      rowsContainer.appendChild(refs.row);
+      applyRowValues(refs, cfg);
+    });
+    updateEmptyState();
+
+    addBtn.addEventListener('click', () => {
+      const newCfg: IExternalPersonConfig = {
+        id: 'ext-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+        name: '',
+        jobTitle: '',
+        managerEmail: '',
+      };
+      const newList = [...getList(), newCfg];
+      const refs = buildRow(newCfg, newList.length - 1);
+      rowRefs.set(newCfg.id, refs);
+      rowsContainer.appendChild(refs.row);
+      applyRowValues(refs, newCfg);
+      updateEmptyState();
+      commit(newList);
+      refs.inputs.name.focus();
+    });
+
+    this._customFields.set(elem, handle);
+  }
+
   protected get dataVersion(): Version {
     return Version.parse('1.0');
   }
@@ -937,6 +1126,30 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
                     onDispose: (elem: HTMLElement) => { this._disposeCustomField(elem); }
                   }
                 } as IPropertyPaneField<IPropertyPaneCustomFieldProps>)
+              ]
+            },
+            {
+              groupName: strings.PropertyPane_Group_ExternalPeople,
+              groupFields: [
+                PropertyPaneLabel('externalPeople', {
+                  text: strings.PropertyPane_ExternalPeople_Note
+                }),
+                ({
+                  type: PropertyPaneFieldType.Custom,
+                  targetProperty: 'externalPeople',
+                  properties: {
+                    key: 'externalPeopleField',
+                    onRender: (elem: HTMLElement, _ctx: any, changeCallback: ChangeCallback) => {
+                      this._renderExternalPeopleField(elem, changeCallback);
+                    },
+                    onDispose: (elem: HTMLElement) => { this._disposeCustomField(elem); }
+                  }
+                } as IPropertyPaneField<IPropertyPaneCustomFieldProps>),
+                PropertyPaneToggle('showExternalBadge', {
+                  label: strings.PropertyPane_ExternalPeople_ShowBadge_Label,
+                  onText: strings.PropertyPane_Visible,
+                  offText: strings.PropertyPane_Hidden
+                })
               ]
             },
             {

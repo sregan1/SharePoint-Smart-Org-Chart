@@ -19,6 +19,7 @@ export interface IGraphUser {
   // graphField. Only populated for fields the admin configured; Search mode
   // never populates this (SharePoint Search has no generic way to read them).
   customAttributes?: { [graphField: string]: string };
+  isExternal?: boolean;      // admin-added person who is not in the directory (see IExternalPersonConfig)
 }
 
 export type PresenceAvailability =
@@ -47,6 +48,25 @@ export interface ICustomAttributeConfig {
   label: string;
   showInDirectory: boolean;
   showInOrgChart: boolean;
+}
+
+// An admin-added person who is not in the Microsoft 365 directory (contractor,
+// partner, vacancy, ...). Placed in the tree under the directory user whose
+// email/UPN is managerEmail. Lives in the web part properties, never in the
+// downloaded/persisted directory data, so editing the list needs no re-download.
+export interface IExternalPersonConfig {
+  id: string;               // stable key for editing/React lists
+  name: string;
+  jobTitle: string;
+  managerEmail: string;
+}
+
+// Prefix for external people's user ids — keeps them from colliding with
+// directory ids (UPNs) and marks ids that have no presence or photo.
+export const EXTERNAL_ID_PREFIX = 'external:';
+
+export function isExternalUserId(userId: string): boolean {
+  return userId.toLowerCase().indexOf(EXTERNAL_ID_PREFIX) === 0;
 }
 
 // Standard Graph /users properties safe to add to $select on demand. Deliberately
@@ -198,6 +218,7 @@ export class GraphService {
   private _filterOptions:  IUserFilterOptions;
   private _dottedLineAttribute: string;                          // AAD extension attribute holding the dotted-line manager
   private _customAttributeFields: string[];                      // admin-configured extra Graph fields to fetch/expose
+  private _externalPeople: IExternalPersonConfig[] = [];         // admin-added people merged in by _buildMaps
 
   // Raw (unfiltered) network data — the single source for all derived state
   private _raw: IRawUserData | null = null;
@@ -257,6 +278,13 @@ export class GraphService {
   // completes, the options are simply used by that load.
   public updateFilterOptions(options: IUserFilterOptions): void {
     this._filterOptions = options || {};
+    if (this._raw) this._buildMaps();
+  }
+
+  // Replaces the admin-added external people. Like updateFilterOptions, this
+  // re-derives from the data already in memory — no network call.
+  public updateExternalPeople(people: IExternalPersonConfig[]): void {
+    this._externalPeople = (people || []).slice();
     if (this._raw) this._buildMaps();
   }
 
@@ -386,9 +414,11 @@ export class GraphService {
       try { await this._loadingPromise; } catch { /* surfaced by the data loaders */ }
     }
 
-    const wanted = userIds
+    // External people aren't in the directory, so they have no presence
+    const wanted = (userIds
       ? Array.from(new Set(userIds.map(id => id.toLowerCase())))
-      : (this._allUsersCache || []).map(u => u.id);
+      : (this._allUsersCache || []).map(u => u.id)
+    ).filter(id => !isExternalUserId(id));
 
     // Each entry has its own fetch time — only refetch missing or stale ones
     const now = Date.now();
@@ -631,23 +661,33 @@ export class GraphService {
     const raw = this._raw;
     if (!raw) return;
 
+    // Admin-added external people bypass the admin user filters — they were
+    // added on purpose, and most filters (department, tenant domain) would
+    // otherwise hide them.
+    const externals = this._buildExternalUsers();
+
     // Resolve manager references against ALL fetched users (before the admin
     // user filters), so a report whose manager is hidden by a filter can be
     // bridged to the nearest visible ancestor instead of orphaning the branch.
-    const allUsers = raw.users;
-    const users = this._applyUserFilters(allUsers).map(cloneUser);
+    const allUsers = externals.users.length > 0 ? raw.users.concat(externals.users) : raw.users;
+    const users = this._applyUserFilters(raw.users).map(cloneUser);
+    if (externals.users.length > 0) {
+      for (const ext of externals.users) users.push(cloneUser(ext));
+      users.sort((a, b) => (a.displayName || '').localeCompare(b.displayName || ''));
+    }
 
     // Display name is a last-resort manager lookup (SP Search sometimes stores
     // only the manager's name). Skip names shared by multiple users — guessing
-    // would silently attach reports to the wrong person.
+    // would silently attach reports to the wrong person. External people are
+    // never anyone's manager, so they don't take part in these lookups.
     const nameCount = new Map<string, number>();
-    for (const user of allUsers) {
+    for (const user of raw.users) {
       const dn = (user.displayName || '').toLowerCase();
       nameCount.set(dn, (nameCount.get(dn) || 0) + 1);
     }
 
     const canonicalId = new Map<string, string>();
-    for (const user of allUsers) {
+    for (const user of raw.users) {
       canonicalId.set(user.id, user.id);
       if (user.mail && !canonicalId.has(user.mail.toLowerCase())) canonicalId.set(user.mail.toLowerCase(), user.id);
       const dn = (user.displayName || '').toLowerCase();
@@ -659,7 +699,7 @@ export class GraphService {
     // user renders as their own child and Expand All never terminates.
     const rawManagerOf = new Map<string, string>();
     for (const user of allUsers) {
-      const rawMgr = raw.managerIds.get(user.id);
+      const rawMgr = raw.managerIds.get(user.id) || externals.managerIds.get(user.id);
       if (!rawMgr) continue;
       const mgrId = canonicalId.get(rawMgr) || rawMgr;
       if (mgrId !== user.id) rawManagerOf.set(user.id, mgrId);
@@ -713,7 +753,7 @@ export class GraphService {
 
     // Photo URLs are derived (cheap strings) — never persisted
     const photoCache = new Map<string, string | null>();
-    for (const user of allUsers) {
+    for (const user of allUsers) {   // external people have no mail/UPN → no photo
       const photoEmail = (user.mail || user.userPrincipalName || '').toLowerCase();
       photoCache.set(user.id, photoEmail && !raw.noPhotoIds.has(user.id)
         ? `${this._webUrl}/_layouts/15/userphoto.aspx?size=L&accountname=${encodeURIComponent(photoEmail)}`
@@ -731,6 +771,34 @@ export class GraphService {
     this._dottedReportsMap = dottedReportsMap;
     this._photoCache       = photoCache;
     this._totalCountCache  = new Map();   // stale once childrenMap changes
+  }
+
+  // Turns the admin-configured external people into directory-shaped users.
+  // Entries without a name are skipped (e.g. a row the admin just added).
+  private _buildExternalUsers(): { users: IGraphUser[]; managerIds: Map<string, string> } {
+    const users: IGraphUser[] = [];
+    const managerIds = new Map<string, string>();
+    for (const person of this._externalPeople) {
+      const name = (person.name || '').trim();
+      if (!name || !person.id) continue;
+      const id = (EXTERNAL_ID_PREFIX + person.id).toLowerCase();
+      users.push({
+        id,
+        displayName: name,
+        mail: '',
+        jobTitle: (person.jobTitle || '').trim(),
+        mobilePhone: '',
+        businessPhones: [],
+        department: '',
+        officeLocation: '',
+        userPrincipalName: '',
+        userType: 'Member',
+        isExternal: true,
+      });
+      const mgr = (person.managerEmail || '').trim().toLowerCase();
+      if (mgr) managerIds.set(id, mgr);
+    }
+    return { users, managerIds };
   }
 
   // Manager data can contain cycles between visible users (A→B→C→A), which

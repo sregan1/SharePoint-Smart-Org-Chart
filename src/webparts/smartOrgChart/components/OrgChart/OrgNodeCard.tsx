@@ -1,7 +1,7 @@
 import * as React from 'react';
 import { Icon } from '@fluentui/react/lib/Icon';
 import { IGraphUser, IOrgNode, PresenceAvailability } from '../../../../services/GraphService';
-import { PRESENCE_COLOR, getInitials } from '../personUtils';
+import { EXTERNAL_BADGE, ExternalBadgeContext, PRESENCE_COLOR, getInitials } from '../personUtils';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
 import { formatString } from '../localeUtils';
 import * as strings from 'SmartOrgChartWebPartStrings';
@@ -71,6 +71,7 @@ const OrgNodeCardInner: React.FC<IOrgNodeCardProps> = ({
   const hasReports = node.directReports.length > 0 || !node.childrenLoaded;
   const isDisabled = user.accountEnabled === false;
   const isGuest    = user.userType === 'Guest';
+  const showExternalBadge = React.useContext(ExternalBadgeContext);
 
   const levelClass   = isRoot ? styles.rootCard : node.level === 1 ? styles.level1Card : '';
   const compactClass = compactCards ? styles.compactCard : '';
@@ -157,6 +158,11 @@ const OrgNodeCardInner: React.FC<IOrgNodeCardProps> = ({
           style={{ background: isDisabled ? '#fde7e9' : '#fff4ce', color: isDisabled ? '#c50f1f' : '#835c00' }}
         >
           {isDisabled ? strings.OrgNode_StatusDisabled : strings.OrgNode_StatusGuest}
+        </div>
+      )}
+      {user.isExternal && showExternalBadge && (
+        <div className={styles.nodeDept} style={{ background: EXTERNAL_BADGE.background, color: EXTERNAL_BADGE.color }}>
+          {strings.OrgNode_StatusExternal}
         </div>
       )}
       {hasReports && (

@@ -49,6 +49,7 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | **Presence badges** | Live availability from Microsoft Teams, refreshed every 60 seconds |
 | **Person profile card** | Full card with manager chain, dotted-line relationships, custom attributes, headcount, and action buttons (Chat, Email, Focus) |
 | **Custom Attributes** | Admin-configured Entra ID fields (Employee ID, Cost Center, etc. — up to 10) shown on Directory cards/columns and the profile card |
+| **External People** | Admin-added people who aren't in Microsoft 365 (contractors, partners, open positions) — name, job title, and the email of the manager they report to; placed in the org chart under that manager, with an optional "External" badge |
 
 ### Admin & Personalization
 
@@ -200,6 +201,10 @@ All settings below are configured in the web part property pane (edit the page �
 ### Custom Attributes
 
 Surface up to 10 additional Entra ID fields on Directory cards/columns and the Org Chart profile card — e.g. `employeeId`, `companyName`, `city`, or an on-premises AD extension attribute (`extensionAttribute1`–`extensionAttribute15`) for things like cost center or building. Each entry has a display label and independent "Show in Directory" / "Show in Org Chart" toggles. Requires the Graph API or Auto data source.
+
+### External People
+
+Add people who are not in your Microsoft 365 directory — contractors, partners, open positions. Click **+ Add person** and enter a **Name**, **Job title**, and **Reports to (manager email)** — the email or UPN of an existing directory user. Each person is placed in the org chart directly under that manager and also appears in the Directory, search, headcounts, and exports, marked with an **External** badge (turn off **Show "External" badge** to hide it). There is no limit on how many you add. External people have no photo (initials are shown), presence, or Chat/Email actions, and are not hidden by the User Filters below. Works with every data source.
 
 ### User Filters
 

@@ -1,6 +1,6 @@
 // MockGraphService — used automatically when the web part runs on localhost or demo mode.
 // Supports three company sizes (150 / 500 / 1 000) selectable via the demo banner.
-import { GraphService, IGraphUser, IRawUserData, IUserFilterOptions, PresenceAvailability } from './GraphService';
+import { GraphService, IGraphUser, IRawUserData, IUserFilterOptions, PresenceAvailability, isExternalUserId } from './GraphService';
 
 const delay = (ms: number): Promise<void> => new Promise(r => setTimeout(r, ms));
 
@@ -618,7 +618,9 @@ export class MockGraphService extends GraphService {
       : (await this.getAllUsers()).map(u => u.id);
     await delay(200);
     const presence = new Map<string, PresenceAvailability>();
-    for (const id of ids) presence.set(id, PRESENCE_POOL[hashCode(id) % PRESENCE_POOL.length]);
+    for (const id of ids) {
+      if (!isExternalUserId(id)) presence.set(id, PRESENCE_POOL[hashCode(id) % PRESENCE_POOL.length]);
+    }
     return presence;
   }
 }

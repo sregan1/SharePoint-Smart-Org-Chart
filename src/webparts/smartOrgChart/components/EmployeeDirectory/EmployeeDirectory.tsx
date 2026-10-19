@@ -6,7 +6,7 @@ import { Dropdown, IDropdownOption } from '@fluentui/react/lib/Dropdown';
 import { IGraphUser, PresenceAvailability, ICustomAttributeConfig } from '../../../../services/GraphService';
 import { IEmployeeDirectoryProps } from './IEmployeeDirectoryProps';
 import { exportDirectoryToExcel } from '../../../../services/PdfExportService';
-import { PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
+import { EXTERNAL_BADGE, ExternalBadgeContext, PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
 import { getAccentCssVars } from '../colorUtils';
 import { formatString } from '../localeUtils';
 import * as strings from 'SmartOrgChartWebPartStrings';
@@ -83,6 +83,8 @@ interface IEmployeeDirectoryState {
 }
 
 export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, IEmployeeDirectoryState> {
+  // Read as this.context — whether to draw the "External" badge
+  public static contextType = ExternalBadgeContext;
   private _photoQueue: string[] = [];
   private _photoQueueSet: Set<string> = new Set();
   private _processingPhotos = false;
@@ -467,6 +469,9 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                     {user.userType === 'Guest' && (
                       <span className={`${styles.statusBadge} ${styles.statusGuest}`}>{strings.Directory_StatusGuest}</span>
                     )}
+                    {user.isExternal && this.context && (
+                      <span className={styles.statusBadge} style={EXTERNAL_BADGE}>{strings.Directory_StatusExternal}</span>
+                    )}
                   </div>
                 </div>
                 {user.mail && (
@@ -560,6 +565,9 @@ export class EmployeeDirectory extends React.Component<IEmployeeDirectoryProps, 
                     )}
                     {user.userType === 'Guest' && (
                       <span className={`${styles.statusBadge} ${styles.statusGuest}`}>{strings.Directory_StatusGuest}</span>
+                    )}
+                    {user.isExternal && this.context && (
+                      <span className={styles.statusBadge} style={EXTERNAL_BADGE}>{strings.Directory_StatusExternal}</span>
                     )}
                   </div>
                 </td>

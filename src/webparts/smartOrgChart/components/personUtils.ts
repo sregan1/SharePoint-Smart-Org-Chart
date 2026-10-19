@@ -1,4 +1,5 @@
 // Shared person-rendering helpers used by both the Employee Directory and the Org Chart.
+import * as React from 'react';
 import { PresenceAvailability } from '../../../services/GraphService';
 import * as strings from 'SmartOrgChartWebPartStrings';
 
@@ -16,6 +17,13 @@ export const PRESENCE_LABEL: Record<PresenceAvailability, string> = {
   Available: strings.Presence_Available, Busy: strings.Presence_Busy, DoNotDisturb: strings.Presence_DoNotDisturb,
   BeRightBack: strings.Presence_BeRightBack, Away: strings.Presence_Away, Offline: strings.Presence_Offline, Unknown: '',
 };
+
+// Badge colors for admin-added people who are not in the directory
+export const EXTERNAL_BADGE = { background: '#e8ebfa', color: '#3d3d9e' };
+
+// Admin "Show External badge" setting. A context rather than a prop because
+// the badge is drawn several component levels below SmartOrgChart.
+export const ExternalBadgeContext = React.createContext<boolean>(true);
 
 export function getInitials(displayName: string): string {
   const parts = (displayName || '').split(' ').filter(p => p.length > 0);

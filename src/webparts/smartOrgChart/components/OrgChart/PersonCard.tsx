@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Icon } from '@fluentui/react/lib/Icon';
 import { FocusTrapZone } from '@fluentui/react/lib/FocusTrapZone';
 import { ICustomAttributeConfig, IGraphUser, PresenceAvailability } from '../../../../services/GraphService';
-import { PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
+import { EXTERNAL_BADGE, ExternalBadgeContext, PRESENCE_COLOR, PRESENCE_LABEL, getInitials } from '../personUtils';
 import { OrgChartTheme, getThemeTokens } from './orgTheme';
 import { dedupeUsers } from './orgTreeUtils';
 import { formatString } from '../localeUtils';
@@ -55,6 +55,7 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
   const initials   = getInitials(user.displayName);
   const isDisabled = user.accountEnabled === false;
   const isGuest    = user.userType === 'Guest';
+  const showExternalBadge = React.useContext(ExternalBadgeContext);
   // Cycles in the directory can repeat a manager (or the person themself)
   const chain      = dedupeUsers(managerChain, user.id);
   const reports    = dedupeUsers(dottedReports, user.id);
@@ -107,6 +108,7 @@ export const PersonCard: React.FC<IPersonCardProps> = ({
             )}
             {isDisabled && <span className={styles.personCardStatusBadge} style={{ background: '#fde7e9', color: '#c50f1f' }}>{strings.PersonCard_StatusDisabled}</span>}
             {isGuest   && <span className={styles.personCardStatusBadge} style={{ background: '#fff4ce', color: '#835c00' }}>{strings.PersonCard_StatusGuest}</span>}
+            {user.isExternal && showExternalBadge && <span className={styles.personCardStatusBadge} style={EXTERNAL_BADGE}>{strings.PersonCard_StatusExternal}</span>}
           </div>
 
           {/* Direct + total headcount */}

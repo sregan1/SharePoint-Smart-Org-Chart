@@ -12,6 +12,7 @@ declare interface ISmartOrgChartWebPartStrings {
   PropertyPane_Group_VisualStyle: string;
   PropertyPane_Group_DataSource: string;
   PropertyPane_Group_CustomAttributes: string;
+  PropertyPane_Group_ExternalPeople: string;
   PropertyPane_Group_UserFilters: string;
   PropertyPane_Group_OrgChart: string;
   PropertyPane_Group_OrgChartFeatures: string;
@@ -87,6 +88,20 @@ declare interface ISmartOrgChartWebPartStrings {
   PropertyPane_CustomAttributes_RemoveAriaLabel: string;
   PropertyPane_CustomAttributes_ShowInDirectory: string;
   PropertyPane_CustomAttributes_ShowInOrgChart: string;
+  PropertyPane_ExternalPeople_Note: string;
+  PropertyPane_ExternalPeople_Heading: string;
+  PropertyPane_ExternalPeople_Empty: string;
+  PropertyPane_ExternalPeople_AddButton: string;
+  PropertyPane_ExternalPeople_NameLabel: string;
+  PropertyPane_ExternalPeople_NamePlaceholder: string;
+  PropertyPane_ExternalPeople_TitleLabel: string;
+  PropertyPane_ExternalPeople_TitlePlaceholder: string;
+  PropertyPane_ExternalPeople_ManagerLabel: string;
+  PropertyPane_ExternalPeople_ManagerPlaceholder: string;
+  PropertyPane_ExternalPeople_ManagerError: string;
+  PropertyPane_ExternalPeople_RemoveTitle: string;
+  PropertyPane_ExternalPeople_RemoveAriaLabel: string;
+  PropertyPane_ExternalPeople_ShowBadge_Label: string;
 
   // ── Property pane: User Filters ──
   PropertyPane_ExcludedAccounts_Label: string;
@@ -176,6 +191,7 @@ declare interface ISmartOrgChartWebPartStrings {
   Directory_AllOffices: string;
   Directory_StatusDisabled: string;
   Directory_StatusGuest: string;
+  Directory_StatusExternal: string;
   Directory_PresenceStatus: string;
   Directory_ChatInTeams: string;
   Directory_ChatWithInTeams: string;
@@ -287,6 +303,7 @@ declare interface ISmartOrgChartWebPartStrings {
   PersonCard_CloseAria: string;
   PersonCard_StatusDisabled: string;
   PersonCard_StatusGuest: string;
+  PersonCard_StatusExternal: string;
   PersonCard_DirectReportSingular: string;
   PersonCard_DirectReportPlural: string;
   PersonCard_TotalSuffix: string;
@@ -311,6 +328,7 @@ declare interface ISmartOrgChartWebPartStrings {
   OrgNode_DirectReportsSuffix: string;
   OrgNode_StatusDisabled: string;
   OrgNode_StatusGuest: string;
+  OrgNode_StatusExternal: string;
   OrgNode_TotalReportsAcrossLevels: string;
 
   // ── Drill view ──

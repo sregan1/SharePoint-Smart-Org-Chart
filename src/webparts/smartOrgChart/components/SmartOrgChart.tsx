@@ -2,13 +2,14 @@ import * as React from 'react';
 import { IconButton } from '@fluentui/react/lib/Button';
 import { Icon } from '@fluentui/react/lib/Icon';
 import { MSGraphClientV3 } from '@microsoft/sp-http';
-import { GraphService, ICustomAttributeConfig, IUserFilterOptions } from '../../../services/GraphService';
+import { GraphService, ICustomAttributeConfig, IExternalPersonConfig, IUserFilterOptions } from '../../../services/GraphService';
 import { MockGraphService, MockCompanySize } from '../../../services/MockGraphService';
 import { ISmartOrgChartProps, IUserSettings } from './ISmartOrgChartProps';
 import { EmployeeDirectory } from './EmployeeDirectory/EmployeeDirectory';
 import { OrgChart } from './OrgChart/OrgChart';
 import { SettingsPanel } from './SettingsPanel/SettingsPanel';
 import { getAccentCssVars } from './colorUtils';
+import { ExternalBadgeContext } from './personUtils';
 import { formatString, getEffectiveLocale } from './localeUtils';
 import * as strings from 'SmartOrgChartWebPartStrings';
 import styles from './SmartOrgChart.module.scss';
@@ -201,15 +202,23 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
     // configured changes what GraphService fetches ($select), so it needs a
     // fresh service; unlike the filters above, updateFilterOptions can't apply it.
     const customFieldsChanged = this._customFieldsKey(prev.customAttributes) !== this._customFieldsKey(this.props.customAttributes);
+    const externalPeopleChanged = this._externalPeopleKey(prev.externalPeople) !== this._externalPeopleKey(this.props.externalPeople);
 
     if (serviceChanged || customFieldsChanged) {
       await this._initGraphService();
-    } else if (filtersChanged && this.state.graphService) {
-      // Re-filter the already-downloaded data in memory — no tenant re-download.
+    } else if ((filtersChanged || externalPeopleChanged) && this.state.graphService) {
+      // Re-derive from the already-downloaded data in memory — no tenant re-download.
       // Bumping serviceGen remounts the views so they read the new result.
-      this.state.graphService.updateFilterOptions(this._buildFilterOptions(this._getTenantDomain()));
+      if (filtersChanged) this.state.graphService.updateFilterOptions(this._buildFilterOptions(this._getTenantDomain()));
+      if (externalPeopleChanged) this.state.graphService.updateExternalPeople(this.props.externalPeople || []);
       this.setState(s => ({ serviceGen: s.serviceGen + 1 }));
     }
+  }
+
+  // Only the fields that affect the tree — edits to a row that are still
+  // incomplete (no name yet) change the key too, which is harmless.
+  private _externalPeopleKey(people: IExternalPersonConfig[] | undefined): string {
+    return JSON.stringify((people || []).map(p => [p.id, p.name, p.jobTitle, p.managerEmail]));
   }
 
   private _isDemoMode(): boolean {
@@ -252,7 +261,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
     if (this._isDemoMode()) {
       const filterOptions = this._buildFilterOptions(this._getTenantDomain());
       this.setState(prev => ({
-        graphService: new MockGraphService(prev.mockSize, filterOptions) as unknown as GraphService,
+        graphService: this._withExternalPeople(new MockGraphService(prev.mockSize, filterOptions)),
         serviceGen: prev.serviceGen + 1,
       }));
       return;
@@ -278,7 +287,12 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
       this.props.dottedLineAttribute || '',
       (this.props.customAttributes || []).map(c => c.graphField)
     );
-    this.setState(prev => ({ graphService: service, serviceGen: prev.serviceGen + 1 }));
+    this.setState(prev => ({ graphService: this._withExternalPeople(service), serviceGen: prev.serviceGen + 1 }));
+  }
+
+  private _withExternalPeople(service: GraphService): GraphService {
+    service.updateExternalPeople(this.props.externalPeople || []);
+    return service;
   }
 
   private _setMockSize = (size: MockCompanySize): void => {
@@ -286,7 +300,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
     this._initRequest++;
     this.setState(prev => ({
       mockSize: size,
-      graphService: new MockGraphService(size, this._buildFilterOptions()) as unknown as GraphService,
+      graphService: this._withExternalPeople(new MockGraphService(size, this._buildFilterOptions())),
       serviceGen: prev.serviceGen + 1,
     }));
   }
@@ -416,6 +430,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
           </div>
         </div>
 
+        <ExternalBadgeContext.Provider value={this.props.showExternalBadge !== false}>
         <div className={styles.content}>
           {currentView === 'directory' && graphService && (
             <EmployeeDirectory
@@ -461,6 +476,7 @@ export class SmartOrgChart extends React.Component<ISmartOrgChartProps, ISmartOr
             />
           )}
         </div>
+        </ExternalBadgeContext.Provider>
 
         <SettingsPanel
           isOpen={isSettingsOpen}
