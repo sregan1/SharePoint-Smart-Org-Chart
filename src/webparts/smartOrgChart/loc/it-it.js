@@ -1,5 +1,11 @@
 define([], function () {
   return {
+    Chart_ZoomPercent: 'Zoom percentage (1–150)',
+    Chart_ZoomFit: 'Fit entire chart',
+    Chart_CanvasActivate: 'Explore chart',
+    Chart_CanvasDone: 'Done',
+    Chart_CanvasHint: 'Activate to pan and pinch to zoom',
+
     // ── Property pane: pane header / groups ──
     PropertyPane_HeaderDescription: 'Impostazioni di Smart Org Chart',
     PropertyPane_Group_General: 'Generale',

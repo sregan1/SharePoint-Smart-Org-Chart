@@ -1,5 +1,11 @@
 define([], function () {
   return {
+    Chart_ZoomPercent: 'Nagyítás százalékban (1–150)',
+    Chart_ZoomFit: 'Teljes ábra',
+    Chart_CanvasActivate: 'Diagram kezelése',
+    Chart_CanvasDone: 'Kész',
+    Chart_CanvasHint: 'Aktiváld a mozgatáshoz és a kétujjas nagyításhoz',
+
     // ── Property pane: pane header / groups ──
     PropertyPane_HeaderDescription: 'Smart Org Chart beállítások',
     PropertyPane_Group_General: 'Általános',

@@ -7,6 +7,7 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   background: #f4f6f9;
 }
 
@@ -1781,4 +1782,75 @@
   .personCardAction { flex: 1 1 40%; }
   .noConfigForm { flex-direction: column; align-items: stretch; width: 100%; }
   .noConfigInput { width: 100%; }
+}
+
+/* Map camera: its natural-sized content must never affect page width. */
+.treeScroll.treeCanvas {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  min-width: 0;
+  min-height: 280px;
+  isolation: isolate;
+  touch-action: pan-y pinch-zoom;
+}
+.canvasContent {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.zoomInput {
+  width: 48px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: right;
+  font: inherit;
+  appearance: textfield;
+  &::-webkit-inner-spin-button, &::-webkit-outer-spin-button { appearance: none; margin: 0; }
+}
+.zoomControls .zoomLabel { min-width: 14px; }
+.canvasTouchControls, .canvasTouchShield { display: none; }
+@media (pointer: fine) {
+  .treeScroll.treeCanvas { touch-action: none; }
+}
+@media (pointer: coarse) {
+  .treeScroll.treeCanvas { cursor: auto; }
+  .treeScroll.canvasActive { touch-action: none; cursor: grab; }
+  .canvasTouchControls {
+    position: absolute;
+    z-index: 3;
+    top: 12px;
+    right: 12px;
+    left: 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    pointer-events: none;
+    button {
+      pointer-events: auto;
+      min-height: 44px;
+      border: 1px solid #c8c8c8;
+      border-radius: 6px;
+      padding: 8px 16px;
+      background: #fff;
+      color: #242424;
+      box-shadow: 0 2px 8px #0002;
+      font: inherit;
+    }
+    span { background: #fff; color: #242424; padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+  }
+  .canvasTouchShield {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    touch-action: pan-y pinch-zoom;
+  }
+  .zoomBtn { width: 40px; height: 44px; }
 }

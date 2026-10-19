@@ -4,6 +4,14 @@ All notable changes to Smart Org Chart are documented here.
 
 ---
 
+## [Unreleased]
+
+### Changed
+- **Map-like org chart navigation** — the Top Down and Left to Right tree layouts now sit on a map-style canvas instead of a scrolling container. The previous scroll-and-zoom view couldn't cope with wide org charts: zoom stopped at 25%, so a wide tree never fit on screen, panning meant hunting with scrollbars, and every zoom step re-rendered every card. Now you can zoom anywhere from 1% to 150% (or type a percentage), zoom with the mouse wheel around the pointer, drag to pan in any direction, **Fit entire chart**, or **Reset zoom** — and expanding a branch keeps your current view. On touch devices, tap **Explore chart** to pan with one finger and pinch to zoom, then **Done** (or Escape) to return to normal page scrolling.
+- **Default Org Chart Zoom** now accepts Auto-fit or any whole percentage from 1% to 100% instead of a fixed list; existing settings are preserved.
+
+---
+
 ## [1.4.1] — 2026-10-05
 
 ### Added

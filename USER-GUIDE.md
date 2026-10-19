@@ -134,9 +134,9 @@ The vertical and horizontal tree layouts display the full loaded hierarchy simul
 - Click the **chevron button** at the bottom of a card to expand or collapse that branch.
 - Use **Expand All** / **Collapse All** in the toolbar to expand or collapse every node at once. **Expand All** fetches the complete organization, loading any levels that have not yet been retrieved from Microsoft Graph.
 
-**Panning:** Click and drag anywhere on the chart canvas to scroll.
+**Panning:** Drag the chart canvas to move in any direction. The chart stays inside its viewport without internal scrollbars. On touch devices, tap **Explore chart** first. Use one finger to pan and two fingers to pinch to zoom. Tap **Done** (or press Escape) to return to normal page scrolling. The chart always starts inactive on touch devices.
 
-**Zooming:** Use the **+** / **−** buttons in the toolbar (bottom-right) or the reset button to return to the default zoom level (100%, or whatever fixed zoom your admin has configured).
+**Zooming:** Enter a percentage directly (1%–150%), use **+** / **−**, or zoom with the mouse wheel around the pointer. **Fit entire chart** centers and fits the expanded tree. **Reset zoom** restores the configured starting zoom and position, or auto-fit if no fixed zoom is configured. After manually panning or zooming, expanding a branch preserves your view.
 
 **Keyboard navigation:** Click a card to give it keyboard focus, then use **Arrow Up/Down/Left/Right** to move between cards and **Home**/**End** to jump to the first or last card at that level. Each card also shows the total headcount below that person, in addition to their direct-report count.
 
@@ -158,7 +158,7 @@ The toolbar appears above the chart and contains the following controls (some ma
 | **User type filter** (funnel icon) | Toggles visibility of Regular members and Guest users. |
 | **Export PDF** (PDF icon) | Downloads the currently visible org chart as a PDF. |
 | **Export CSV** (Excel icon) | Downloads the currently visible org chart as a CSV spreadsheet. |
-| **Zoom controls** | Visible in tree modes only. Adjust the scale from 25% to 150%. |
+| **Zoom controls** | Visible in tree modes only. Enter any percentage from 1% to 150%, pan and zoom, fit the entire tree, or reset the view. |
 
 #### Stats bar
 
@@ -339,7 +339,7 @@ These filters are applied globally — hidden users do not appear in the directo
 | **Top-Level User** | UPN or email of the person at the root of the org chart (e.g. `ceo@company.com`). Required. |
 | **Levels to load below root** | How many hierarchy levels to fetch on initial load (1–8). Higher values load more data upfront; lower values are faster but require more click-through to explore deep branches. |
 | **Dotted-line manager attribute** | Optional. The name of an on-premises AD extension attribute (`extensionAttribute1` through `extensionAttribute15`) that holds a secondary "dotted line" manager's email or UPN. When set, that secondary reporting relationship appears in the [Person Profile Card](#5-person-profile-card). Requires the Graph API data source. |
-| **Default Org Chart Zoom** | Starting zoom level for the org chart: Auto-fit (default), 50%, 75%, 100%, 125%, or 150%. When set to a fixed value, the chart opens at that zoom rather than fitting to the visible area. |
+| **Default Org Chart Zoom** | Starting zoom: Auto-fit (default), or switch off Auto-fit and enter any whole percentage from 1% to 100%. Existing saved fixed zoom settings remain compatible. The toolbar lets viewers zoom up to 150%. |
 
 ### Org Chart Features
 

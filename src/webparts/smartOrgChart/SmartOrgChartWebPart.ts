@@ -202,6 +202,48 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
     return `soc-${name}-${this.context.instanceId}`;
   }
 
+  private _renderZoomField(elem: HTMLElement, changeCallback: ChangeCallback): void {
+    if (this._resyncCustomField(elem, changeCallback)) return;
+    const label = document.createElement('label');
+    label.textContent = `${strings.PropertyPane_DefaultZoom_Label} (%)`;
+    const input = document.createElement('input');
+    input.id = this._fieldId('defaultZoom');
+    label.htmlFor = input.id;
+    input.type = 'number';
+    input.min = '1'; input.max = '100'; input.step = '1';
+    input.style.cssText = 'display:block;width:100%;box-sizing:border-box;padding:6px;margin:6px 0 12px;';
+    const autoLabel = document.createElement('label');
+    const auto = document.createElement('input');
+    auto.type = 'checkbox';
+    autoLabel.appendChild(auto);
+    autoLabel.appendChild(document.createTextNode(strings.PropertyPane_Zoom_Auto));
+    const sync = (): void => {
+      auto.checked = !(this.properties.defaultZoom > 0);
+      input.disabled = auto.checked;
+      input.value = String(Math.round((this.properties.defaultZoom || 1) * 100));
+    };
+    const update = (value: number): void => {
+      const callback = this._customFields.get(elem)?.changeCallback;
+      if (callback) callback('defaultZoom', value);
+      sync();
+    };
+    const onInput = (): void => {
+      if (input.value && input.checkValidity()) update(Number(input.value) / 100);
+    };
+    const onAuto = (): void => { update(auto.checked ? 0 : 1); };
+    const onBlur = (): void => { sync(); };
+    input.addEventListener('input', onInput);
+    input.addEventListener('blur', onBlur);
+    auto.addEventListener('change', onAuto);
+    elem.appendChild(label); elem.appendChild(input); elem.appendChild(autoLabel);
+    this._customFields.set(elem, { changeCallback, sync, dispose: () => {
+      input.removeEventListener('input', onInput);
+      input.removeEventListener('blur', onBlur);
+      auto.removeEventListener('change', onAuto);
+    } });
+    sync();
+  }
+
   private _renderAccentPicker(elem: HTMLElement, changeCallback: ChangeCallback): void {
     if (this._resyncCustomField(elem, changeCallback)) return;
     elem.innerHTML = '';
@@ -958,18 +1000,17 @@ export default class SmartOrgChartWebPart extends BaseClientSideWebPart<ISmartOr
                   placeholder: strings.PropertyPane_DottedLine_Placeholder,
                   description: strings.PropertyPane_DottedLine_Description
                 }),
-                PropertyPaneDropdown('defaultZoom', {
-                  label: strings.PropertyPane_DefaultZoom_Label,
-                  options: [
-                    { key: 0,    text: strings.PropertyPane_Zoom_Auto },
-                    { key: 0.5,  text: strings.PropertyPane_Zoom_50 },
-                    { key: 0.75, text: strings.PropertyPane_Zoom_75 },
-                    { key: 1,    text: strings.PropertyPane_Zoom_100 },
-                    { key: 1.25, text: strings.PropertyPane_Zoom_125 },
-                    { key: 1.5,  text: strings.PropertyPane_Zoom_150 },
-                  ],
-                  selectedKey: this.properties.defaultZoom ?? 0,
-                })
+                ({
+                  type: PropertyPaneFieldType.Custom,
+                  targetProperty: 'defaultZoom',
+                  properties: {
+                    key: 'defaultZoomField',
+                    onRender: (elem: HTMLElement, _ctx: any, callback: ChangeCallback) => {
+                      this._renderZoomField(elem, callback);
+                    },
+                    onDispose: (elem: HTMLElement) => { this._disposeCustomField(elem); }
+                  }
+                } as IPropertyPaneField<IPropertyPaneCustomFieldProps>)
               ]
             },
             {

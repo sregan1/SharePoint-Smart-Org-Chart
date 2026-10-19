@@ -37,7 +37,7 @@ A SharePoint Framework web part that gives any SharePoint Online page a searchab
 | **Department filter** | Narrow the chart to one or more departments |
 | **User type filter** | Show or hide members and guest users independently |
 | **Statistics panel** | Headcount, members, guests, and departments overlaid on the chart |
-| **Zoom** | 25%–150% with auto-fit on initial load |
+| **Zoom** | 1%–150%, editable percentage, cursor-centered wheel zoom and full-chart fit |
 | **Export to PDF** | PDF button in the toolbar downloads the currently visible chart |
 | **Export to CSV** | CSV button in the toolbar downloads the currently visible chart data |
 
@@ -139,6 +139,8 @@ npm run demo:screenshots
 
 This builds a standalone webpack bundle, starts a local HTTP server, and captures screenshots via Puppeteer. Output goes to `docs/screenshots/`. You can also run the demo server manually — see the `demo/` folder.
 
+To check tree navigation in desktop and mobile Chrome, run `npm run test:navigation`. Set `CHROME_PATH` if Chrome is installed outside its default Windows location. The tests cover 150/500/1,000-person trees in both orientations, arbitrary zoom, cursor anchoring, dragging, mobile page scrolling and pinch gestures.
+
 ---
 
 ## Build & Deploy
@@ -217,7 +219,7 @@ Surface up to 10 additional Entra ID fields on Directory cards/columns and the O
 | **Top-Level User** | _(required)_ | UPN or email of the root person (e.g. `ceo@company.com`) |
 | **Levels to load below root** | 3 | How many hierarchy levels to fetch on initial load (1–8) |
 | **Dotted-line manager attribute** | _(empty)_ | Optional on-premises AD extension attribute (`extensionAttribute1`–`15`) holding a secondary "dotted line" manager's email/UPN; shown on the profile card. Requires Graph API. |
-| **Default Org Chart Zoom** | Auto-fit | Starting zoom: Auto-fit, 50%, 75%, 100%, 125%, or 150% |
+| **Default Org Chart Zoom** | Auto-fit | Auto-fit or any whole percentage from 1% to 100%; existing fixed zoom settings are preserved |
 
 ### Org Chart Features
 

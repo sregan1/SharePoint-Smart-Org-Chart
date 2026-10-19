@@ -1,4 +1,10 @@
 declare interface ISmartOrgChartWebPartStrings {
+  Chart_ZoomPercent: string;
+  Chart_ZoomFit: string;
+  Chart_CanvasActivate: string;
+  Chart_CanvasDone: string;
+  Chart_CanvasHint: string;
+
   // ── Property pane: pane header / groups ──
   PropertyPane_HeaderDescription: string;
   PropertyPane_Group_General: string;

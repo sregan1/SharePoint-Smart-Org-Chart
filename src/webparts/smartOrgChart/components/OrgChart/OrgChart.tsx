@@ -23,6 +23,7 @@ import { OrgTree } from './OrgTree';
 import { DrillView } from './DrillView';
 import { NoConfigForm, UserFilterKey } from './ChartControls';
 import { OrgChartToolbar } from './OrgChartToolbar';
+import { TreeCanvas } from './TreeCanvas';
 import { formatString } from '../localeUtils';
 import * as strings from 'SmartOrgChartWebPartStrings';
 
@@ -101,15 +102,9 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   private _rootPickerRef    = React.createRef<HTMLDivElement>();
   private _drillHeaderRef   = React.createRef<HTMLDivElement>();
   private _personCardOpener: HTMLElement | null = null;
-  private _isPanning        = false;
+  private _canvas = React.createRef<TreeCanvas>();
   private _requestedReportCounts = new Set<string>();
   private _requestedPhotos  = new Set<string>();
-  private _panStartX        = 0;
-  private _panStartY        = 0;
-  private _scrollStartX     = 0;
-  private _scrollStartY     = 0;
-  private _panDistance      = 0;
-  private _lastPanEndTime   = 0;
   // Incremented by every navigation that replaces the view (load, focus,
   // re-root) so late responses from a superseded request are dropped
   private _navSeq           = 0;
@@ -226,10 +221,6 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (prev.defaultLayout !== this.props.defaultLayout) {
       this._setLayout(this.props.defaultLayout || 'drill');
     }
-    if (prev.defaultZoom !== this.props.defaultZoom) {
-      this.setState({ zoomLevel: this.props.defaultZoom > 0 ? this.props.defaultZoom : 1 },
-        () => { if (!(this.props.defaultZoom > 0)) this._autoFitZoom(); });
-    }
     if (prev.enableLayoutToggle && !this.props.enableLayoutToggle) {
       this._setLayout(this.props.defaultLayout || 'drill');
     }
@@ -250,7 +241,6 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
       prevState.filterMembers     !== s.filterMembers     ||
       prevState.filterGuests      !== s.filterGuests      ||
       prevState.filterDisabled    !== s.filterDisabled    ||
-      prevState.zoomLevel         !== s.zoomLevel         ||
       prevState.chartLayout       !== s.chartLayout
     ) {
       this._fixConnectorLines();
@@ -717,14 +707,13 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     requestAnimationFrame(() => {
       const container = this._scrollEl;
       if (!container || !this._mounted) return;
-      const zoom = this.state.zoomLevel || 1;
       const allChildren = container.querySelectorAll(`.${styles.children}`) as NodeListOf<HTMLElement>;
       allChildren.forEach(childrenDiv => {
         const first = childrenDiv.firstElementChild as HTMLElement;
         const last  = childrenDiv.lastElementChild  as HTMLElement;
         if (!first || !last) return;
-        const left  = first.getBoundingClientRect().width / (2 * zoom);
-        const right = last.getBoundingClientRect().width  / (2 * zoom);
+        const left  = first.offsetWidth / 2;
+        const right = last.offsetWidth / 2;
         childrenDiv.style.setProperty('--conn-left',  `${left}px`);
         childrenDiv.style.setProperty('--conn-right', `${right}px`);
       });
@@ -732,26 +721,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   }
 
   private _autoFitZoom(): void {
-    if (this.props.defaultZoom > 0) return; // fixed zoom configured — don't override
-    requestAnimationFrame(() => {
-      const container = this._scrollEl;
-      if (!container || !this._mounted) return;
-      const treeWrapper = container.firstElementChild as HTMLElement;
-      if (!treeWrapper) return;
-      const naturalW = treeWrapper.offsetWidth;
-      const naturalH = treeWrapper.offsetHeight;
-      if (!naturalW || !naturalH) return;
-      const cW = container.clientWidth;
-      const cH = container.clientHeight;
-      const scaleX = cW / naturalW;
-      const scaleY = cH / naturalH;
-      const fitZoom = Math.min(scaleX, scaleY) * 0.90;
-      // Shrink to fit, or grow back toward 100% when a smaller subtree is shown
-      const newZoom = Math.max(0.25, Math.min(1, fitZoom));
-      if (Math.abs(newZoom - this.state.zoomLevel) > 0.01) {
-        this.setState({ zoomLevel: newZoom });
-      }
-    });
+    requestAnimationFrame(() => { if (this._mounted) this._canvas.current?.autoFit(); });
   }
 
   private _loadPhotosForTree(node: IOrgNode): void {
@@ -966,7 +936,12 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     if (!container) return;
     const cards = container.querySelectorAll('[data-soc-id]');
     for (let i = 0; i < cards.length; i++) {
-      if (cards[i].getAttribute('data-soc-id') === userId) { (cards[i] as HTMLElement).focus(); return; }
+      if (cards[i].getAttribute('data-soc-id') === userId) {
+        const card = cards[i] as HTMLElement;
+        this._canvas.current?.reveal(card);
+        card.focus({ preventScroll: true });
+        return;
+      }
     }
   }
 
@@ -980,7 +955,6 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
   /* ── Card click → profile popup ── */
 
   private _handleCardClick = (user: IGraphUser): void => {
-    if (Date.now() - this._lastPanEndTime < 150) return;
     const active = document.activeElement;
     this._personCardOpener = active instanceof HTMLElement && active !== document.body ? active : null;
     this.setState({
@@ -1135,11 +1109,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
         ancestorChain: dedupeUsers(ancestorChain, user.id),
         isRefocusing: false, treeFocusId: expanded.user.id,
       }, () => {
-        if (this._scrollEl) {
-          this._scrollEl.scrollLeft = 0;
-          this._scrollEl.scrollTop  = 0;
-        }
-        this._autoFitZoom();
+        this._canvas.current?.reset();
         if (moveFocus) this._focusTreeCard(expanded.user.id);
       });
       this._loadPhotosForTree(expanded);
@@ -1298,103 +1268,19 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     this.setState({ showLayoutPicker: false });
   }
 
-  private _zoomOut = (): void => {
-    this.setState(p => ({ zoomLevel: Math.max(0.25, p.zoomLevel - 0.1) }));
-  }
-
-  private _zoomIn = (): void => {
-    this.setState(p => {
-      const next = Math.min(1.5, p.zoomLevel + 0.1);
-      return { zoomLevel: p.zoomLevel < 1 && next > 1 ? 1 : next };
-    });
-  }
-
-  private _zoomReset = (): void => {
-    this.setState({ zoomLevel: this.props.defaultZoom > 0 ? this.props.defaultZoom : 1 });
-  }
+  private _zoomOut = (): void => { this._canvas.current?.setZoom(Math.min(this.state.zoomLevel - 0.01, this.state.zoomLevel / 1.2)); };
+  private _zoomIn = (): void => { this._canvas.current?.setZoom(Math.max(this.state.zoomLevel + 0.01, this.state.zoomLevel * 1.2)); };
+  private _zoomReset = (): void => { this._canvas.current?.reset(); };
+  private _zoomFit = (): void => { this._canvas.current?.fit(); };
+  private _setZoom = (zoom: number): void => { this._canvas.current?.setZoom(zoom); };
+  private _onCanvasZoom = (zoom: number): void => {
+    if (Math.abs(zoom - this.state.zoomLevel) > 0.00001) this.setState({ zoomLevel: zoom });
+  };
+  private _setScrollRef = (el: HTMLDivElement | null): void => { this._scrollEl = el; };
 
   private _closePopups = (): void => {
     this.setState({ showFilters: false, showDeptFilter: false, showLayoutPicker: false });
-  }
-
-  /* ── Drag-to-pan (mouse) ── */
-
-  // Callback ref: the scroll area unmounts in drill layout and while loading,
-  // so the non-passive touchmove listener follows the element's lifetime.
-  private _setScrollRef = (el: HTMLDivElement | null): void => {
-    if (this._scrollEl === el) return;
-    if (this._scrollEl) this._scrollEl.removeEventListener('touchmove', this._handleTouchMoveDirect);
-    this._scrollEl = el;
-    if (el) el.addEventListener('touchmove', this._handleTouchMoveDirect, { passive: false });
-  }
-
-  // The grabbing cursor is toggled directly on the element — a state update
-  // would re-render the whole chart at the start and end of every drag
-  private _setPanningClass(on: boolean): void {
-    if (!this._scrollEl) return;
-    if (on) this._scrollEl.classList.add(styles.treeScrollPanning);
-    else this._scrollEl.classList.remove(styles.treeScrollPanning);
-  }
-
-  private _handlePanStart = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if ((e.target as HTMLElement).closest('button, a, input')) return;
-    this._isPanning    = true;
-    this._panDistance  = 0;
-    this._panStartX    = e.clientX;
-    this._panStartY    = e.clientY;
-    this._scrollStartX = this._scrollEl?.scrollLeft ?? 0;
-    this._scrollStartY = this._scrollEl?.scrollTop  ?? 0;
-    this._setPanningClass(true);
-    e.preventDefault();
-  }
-
-  private _handlePanMove = (e: React.MouseEvent<HTMLDivElement>): void => {
-    if (!this._isPanning || !this._scrollEl) return;
-    const dx = e.clientX - this._panStartX;
-    const dy = e.clientY - this._panStartY;
-    this._panDistance = Math.sqrt(dx * dx + dy * dy);
-    this._scrollEl.scrollLeft = this._scrollStartX - dx;
-    this._scrollEl.scrollTop  = this._scrollStartY - dy;
-  }
-
-  private _handlePanEnd = (): void => {
-    if (!this._isPanning) return;
-    if (this._panDistance > 8) this._lastPanEndTime = Date.now();
-    this._isPanning = false;
-    this._setPanningClass(false);
-  }
-
-  /* ── Drag-to-pan (touch) ── */
-
-  private _handleTouchStart = (e: React.TouchEvent<HTMLDivElement>): void => {
-    if ((e.target as HTMLElement).closest('button, a, input')) return;
-    const touch = e.touches[0];
-    this._isPanning    = true;
-    this._panDistance  = 0;
-    this._panStartX    = touch.clientX;
-    this._panStartY    = touch.clientY;
-    this._scrollStartX = this._scrollEl?.scrollLeft ?? 0;
-    this._scrollStartY = this._scrollEl?.scrollTop  ?? 0;
-    this._setPanningClass(true);
-  }
-
-  private _handleTouchMoveDirect = (e: TouchEvent): void => {
-    if (!this._isPanning || !this._scrollEl) return;
-    e.preventDefault();
-    const touch = e.touches[0];
-    const dx = touch.clientX - this._panStartX;
-    const dy = touch.clientY - this._panStartY;
-    this._panDistance = Math.sqrt(dx * dx + dy * dy);
-    this._scrollEl.scrollLeft = this._scrollStartX - dx;
-    this._scrollEl.scrollTop  = this._scrollStartY - dy;
-  }
-
-  private _handleTouchEnd = (): void => {
-    if (!this._isPanning) return;
-    if (this._panDistance > 8) this._lastPanEndTime = Date.now();
-    this._isPanning = false;
-    this._setPanningClass(false);
-  }
+  };
 
   /* ── Render ── */
 
@@ -1443,7 +1329,6 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
     }
     const stats        = showStats ? this._stats : null;
     const isDrillMode  = chartLayout === 'drill';
-    const resetZoom    = this.props.defaultZoom > 0 ? this.props.defaultZoom : 1;
     const isBusy       = isRefocusing || isExpandingAll;
 
     const containerClasses = [
@@ -1527,10 +1412,11 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
           onRootPickerSelect={this._onRootPickerSelect}
           onResetRoot={this._resetRoot}
           zoomLevel={zoomLevel}
-          resetZoom={resetZoom}
           onZoomOut={this._zoomOut}
           onZoomIn={this._zoomIn}
           onZoomReset={this._zoomReset}
+          onZoomFit={this._zoomFit}
+          onZoomChange={this._setZoom}
         />
 
         {/* ── Find Me error toast ── */}
@@ -1607,27 +1493,16 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
 
         {/* ── FULL TREE VIEW ── */}
         {!isDrillMode && (
-          <div
-            ref={this._setScrollRef}
+          <TreeCanvas
+            key={chartLayout}
+            ref={this._canvas}
+            defaultZoom={this.props.defaultZoom}
             className={treeScrollClasses}
-            style={{ position: 'relative' }}
-            onMouseDown={this._handlePanStart}
-            onMouseMove={this._handlePanMove}
-            onMouseUp={this._handlePanEnd}
-            onMouseLeave={this._handlePanEnd}
-            onTouchStart={this._handleTouchStart}
-            onTouchEnd={this._handleTouchEnd}
-            aria-busy={isBusy}
+            busy={isBusy}
+            onViewport={this._setScrollRef}
+            onZoom={this._onCanvasZoom}
           >
             <div
-              style={
-                chartLayout === 'horizontal'
-                  ? { zoom: zoomLevel, display: 'inline-block', minWidth: '100%' }
-                  // Vertical (top-down): the root's own box shrinks to fit its
-                  // subtree width, so without an explicit centering flex wrapper
-                  // it lands flush left instead of over the middle of its tree.
-                  : { zoom: zoomLevel, display: 'flex', justifyContent: 'center', minWidth: '100%' }
-              }
               role="tree"
               aria-label={strings.Chart_OrgChartAria}
               onKeyDown={this._handleTreeKeyDown}
@@ -1654,7 +1529,7 @@ export class OrgChart extends React.Component<IOrgChartProps, IOrgChartLocalStat
                 onItemFocus={this._handleTreeItemFocus}
               />
             </div>
-          </div>
+          </TreeCanvas>
         )}
 
         {/* ── Popups backdrop ── */}

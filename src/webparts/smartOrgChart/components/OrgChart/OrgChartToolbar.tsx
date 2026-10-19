@@ -94,7 +94,8 @@ export interface IOrgChartToolbarProps {
   onResetRoot: () => void;
 
   zoomLevel: number;
-  resetZoom: number;
+  onZoomFit: () => void;
+  onZoomChange: (zoom: number) => void;
   onZoomOut: () => void;
   onZoomIn: () => void;
   onZoomReset: () => void;
@@ -103,6 +104,14 @@ export interface IOrgChartToolbarProps {
 const preventMouseFocus = (e: React.MouseEvent): void => { e.preventDefault(); };
 
 export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
+  const [zoomDraft, setZoomDraft] = React.useState<string | null>(null);
+  const commitZoom = (): void => {
+    if (zoomDraft !== null && zoomDraft.trim() !== '') {
+      const value = Number(zoomDraft);
+      if (Number.isFinite(value)) p.onZoomChange(Math.max(1, Math.min(150, value)) / 100);
+    }
+    setZoomDraft(null);
+  };
   const t = getThemeTokens(p.theme, p.accentColor);
   const { isDrillMode, appliedQuery, matchCount, searchResults, searchActiveIndex } = p;
   const listOpen  = p.showSearchResults && searchResults.length > 0;
@@ -386,15 +395,24 @@ export const OrgChartToolbar: React.FC<IOrgChartToolbarProps> = (p) => {
       {/* Zoom — only in full-tree mode */}
       {!isDrillMode && (
         <div className={styles.zoomControls}>
-          <button className={styles.zoomBtn} onClick={p.onZoomOut} title={strings.Chart_ZoomOutTitle} aria-label={strings.Chart_ZoomOutTitle} disabled={p.zoomLevel <= 0.25}>
+          <button className={styles.zoomBtn} onClick={p.onZoomOut} title={strings.Chart_ZoomOutTitle} aria-label={strings.Chart_ZoomOutTitle} disabled={p.zoomLevel <= 0.01}>
             <Icon iconName="Remove" />
           </button>
-          <span className={styles.zoomLabel} aria-live="polite">{Math.round(p.zoomLevel * 100)}%</span>
+          <input className={styles.zoomInput} type="number" min={1} max={150} step={1}
+            aria-label={strings.Chart_ZoomPercent} value={zoomDraft === null ? Math.round(p.zoomLevel * 100) : zoomDraft}
+            onChange={e => setZoomDraft(e.target.value)} onBlur={commitZoom}
+            onKeyDown={e => {
+              if (e.key === 'Enter') { e.currentTarget.blur(); }
+              if (e.key === 'Escape') { setZoomDraft(null); }
+            }} /><span className={styles.zoomLabel}>%</span>
           <button className={styles.zoomBtn} onClick={p.onZoomIn} title={strings.Chart_ZoomInTitle} aria-label={strings.Chart_ZoomInTitle} disabled={p.zoomLevel >= 1.5}>
             <Icon iconName="Add" />
           </button>
-          <button className={styles.zoomBtn} onClick={p.onZoomReset} title={strings.Chart_ZoomResetTitle} aria-label={strings.Chart_ZoomResetTitle} disabled={p.zoomLevel === p.resetZoom}>
+          <button className={styles.zoomBtn} onClick={p.onZoomReset} title={strings.Chart_ZoomResetTitle} aria-label={strings.Chart_ZoomResetTitle}>
             <Icon iconName="Refresh" />
+          </button>
+          <button className={styles.zoomBtn} onClick={p.onZoomFit} title={strings.Chart_ZoomFit} aria-label={strings.Chart_ZoomFit}>
+            <Icon iconName="ZoomToFit" />
           </button>
         </div>
       )}

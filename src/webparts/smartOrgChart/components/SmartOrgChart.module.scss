@@ -5,6 +5,7 @@
   font-size: $ms-font-size-m;
   color: #201f1e;
   min-height: 600px;
+  min-width: 0;
   display: flex;
   flex-direction: column;
   background: #ffffff;
@@ -151,6 +152,7 @@
 .content {
   flex: 1;
   min-height: 0;   /* critical: lets inner flex children scroll */
+  min-width: 0;
   overflow: auto;
   display: flex;
   flex-direction: column;
